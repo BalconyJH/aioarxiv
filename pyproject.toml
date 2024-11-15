@@ -1,0 +1,108 @@
+[project]
+name = "aioarxiv"
+version = "0.1.0"
+description = "arxiv Parse library"
+authors = [
+    { name = "BalconyJH", email = "balconyjh@gmail.com" },
+]
+dependencies = [
+    "feedparser~=6.0",
+    "loguru~=0.7",
+    "pydantic>=2.9.2",
+    "aiohttp>=3.10.10",
+    "tenacity>=9.0.0",
+    "aiofiles>=24.1.0",
+]
+requires-python = ">=3.9"
+readme = "README.md"
+license = { text = "MIT" }
+
+[tool.pdm]
+distribution = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+addopts = "--cov-report=term-missing --ignore=.venv/"
+asyncio_default_fixture_loop_scope = "session"
+
+[tool.black]
+line-length = 88
+target-version = ["py39", "py310", "py311", "py312"]
+include = '\.pyi?$'
+extend-exclude = '''
+'''
+
+[tool.isort]
+profile = "black"
+line_length = 88
+length_sort = true
+skip_gitignore = true
+force_sort_within_sections = true
+src_paths = ["src", "tests"]
+extra_standard_library = ["typing_extensions"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py39"
+
+[tool.ruff.lint]
+select = [
+    "F", # Pyflakes
+    "W", # pycodestyle warnings
+    "E", # pycodestyle errors
+    "UP", # pyupgrade
+    "ASYNC", # flake8-async
+    "C4", # flake8-comprehensions
+    "T10", # flake8-debugger
+    "T20", # flake8-print
+    "PYI", # flake8-pyi
+    "PT", # flake8-pytest-style
+    "Q", # flake8-quotes
+    "RUF", # Ruff-specific rules
+    "I", # isort
+]
+ignore = [
+    "E402", # module-import-not-at-top-of-file
+    "E501", # line-too-long
+    "UP037", # quoted-annotation
+    "RUF001", # ambiguous-unicode-character-string
+    "RUF002", # ambiguous-unicode-character-docstring
+    "RUF003", # ambiguous-unicode-character-comment
+    "ASYNC230", # blocking-open-call-in-async-function
+]
+
+[tool.ruff.lint.flake8-pytest-style]
+fixture-parentheses = false
+mark-parentheses = false
+
+[tool.pyright]
+pythonVersion = "3.9"
+pythonPlatform = "All"
+executionEnvironments = [
+    { root = "./tests", extraPaths = [
+        "./",
+    ] },
+    { root = "./src" },
+]
+typeCheckingMode = "standard"
+disableBytesTypePromotions = true
+
+[dependency-groups]
+test = [
+    "pytest-cov~=5.0",
+    "pytest-xdist~=3.6",
+    "pytest-asyncio~=0.23",
+    "pytest-mock>=3.14.0",
+]
+dev = [
+    "black~=24.4",
+    "ruff~=0.4",
+    "isort~=5.13",
+    "pre-commit~=4.0",
+    "bump-my-version>=0.28.1",
+]
+
+[tool.coverage.run]
+omit = [
+    ".venv/*",
+]

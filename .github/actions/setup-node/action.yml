@@ -1,0 +1,13 @@
+name: Setup Node
+description: Setup Node
+
+runs:
+  using: "composite"
+  steps:
+    - uses: actions/setup-node@v4
+      with:
+        node-version: "18"
+        cache: "yarn"
+
+    - run: yarn install --frozen-lockfile
+      shell: bash

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE categories
+        SYSTEM "https://resources.jetbrains.com/writerside/1.0/categories.dtd">
+<categories>
+    <category id="wrs" name="Writerside documentation" order="1"/>
+    <category id="arxiv-api" name="arXiv API" order="2"/>
+    <category id="aioarxiv" name="aioarxiv Library" order="3"/>
+</categories>

@@ -1,0 +1,35 @@
+name: Pyright Lint
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    paths:
+      - "envs/**"
+      - "src/**"
+      - "tests/**"
+      - ".github/actions/setup-python/**"
+      - ".github/workflows/pyright.yml"
+      - "pyproject.toml"
+      - "pdm.lock"
+
+jobs:
+  pyright:
+    name: Pyright Lint
+    runs-on: ubuntu-latest
+    concurrency:
+      group: pyright-${{ github.ref }}-${{ matrix.env }}
+      cancel-in-progress: true
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python environment
+        uses: ./.github/actions/setup-python
+        with:
+          env-dir: ./envs/${{ matrix.env }}
+          no-root: true
+
+      - name: Run Pyright
+        uses: jakebailey/pyright-action@v2

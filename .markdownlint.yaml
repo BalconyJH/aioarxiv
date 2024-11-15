@@ -1,0 +1,13 @@
+MD013: false
+MD024:
+  siblings_only: true
+MD033: false
+
+code-block:
+  ignore: true
+
+markdown-code-block:
+  format: false
+
+fenced-code-blocks:
+  validate: false

@@ -1,0 +1,29 @@
+name: Ruff Lint
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    paths:
+      - "envs/**"
+      - "src/**"
+      - "tests/**"
+      - ".github/actions/setup-python/**"
+      - ".github/workflows/ruff.yml"
+      - "pyproject.toml"
+      - "pdm.lock"
+
+jobs:
+  ruff:
+    name: Ruff Lint
+    runs-on: ubuntu-latest
+    concurrency:
+      group: pyright-${{ github.ref }}
+      cancel-in-progress: true
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run Ruff Lint
+        uses: chartboost/ruff-action@v1

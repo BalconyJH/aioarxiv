@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE terms SYSTEM "https://resources.jetbrains.com/writerside/1.0/glossary.dtd">
+<terms>
+    <term name="ArxivClient">
+        异步arXiv API客户端的主类,用于执行论文搜索和获取操作。
+    </term>
+
+    <term name="Paper">
+        表示单篇arXiv论文的数据模型,包含标题、作者、摘要等信息。
+    </term>
+
+    <term name="SearchParams">
+        搜索参数配置类,用于定义查询条件和结果限制。
+    </term>
+
+    <term name="ArxivConfig">
+        客户端配置类,用于设置API访问参数如并发限制、请求频率等。
+    </term>
+
+    <term name="BatchContext">
+        批量处理上下文类,用于跟踪批量获取论文的状态和进度。
+    </term>
+
+    <term name="Category">
+        论文分类信息模型,包含主分类和次分类。
+    </term>
+
+    <term name="SessionManager">
+        会话管理器,负责维护HTTP会话和实现访问频率限制。
+    </term>
+
+    <term name="ArxivParser">
+        XML解析器,用于解析arXiv API返回的Atom feed格式数据。
+    </term>
+
+    <term name="SearchCompleteException">
+        搜索完成异常,用于标识搜索达到结果限制或无结果时的情况。
+    </term>
+
+    <term name="ParserException">
+        解析异常,在XML数据解析失败时抛出。
+    </term>
+</terms>
