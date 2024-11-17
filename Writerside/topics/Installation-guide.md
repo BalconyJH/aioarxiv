@@ -32,7 +32,7 @@
 
 | **Version** | **Build**    | **Release Date** | **Status** | **Notes**             |
 |-------------|--------------|------------------|------------|-----------------------|
-| 0.1.1       | PyPI Release | 15/11/2024       | Latest     | Initial testing phase |
+| 0.1.2       | PyPI Release | 15/11/2024       | Latest     | Initial testing phase |
 
 ## System requirements
 
