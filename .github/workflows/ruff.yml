@@ -3,11 +3,11 @@ name: Ruff Lint
 on:
   push:
     branches:
-      - master
+      - main
   pull_request:
     paths:
       - "envs/**"
-      - "src/**"
+      - "aioarxiv/**"
       - "tests/**"
       - ".github/actions/setup-python/**"
       - ".github/workflows/ruff.yml"

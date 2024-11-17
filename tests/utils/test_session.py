@@ -4,9 +4,9 @@ import pytest
 from aiohttp import ClientResponse, ClientSession, ClientTimeout
 from pytest_mock import MockerFixture
 
-from src.config import ArxivConfig
-from src.utils.rate_limiter import RateLimiter
-from src.utils.session import SessionManager
+from src.aioarxiv.config import ArxivConfig
+from src.aioarxiv.utils.rate_limiter import RateLimiter
+from src.aioarxiv.utils.session import SessionManager
 
 
 @pytest.fixture

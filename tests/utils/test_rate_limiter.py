@@ -2,7 +2,7 @@ import asyncio
 
 import pytest
 
-from src.utils.rate_limiter import RateLimiter
+from src.aioarxiv.utils.rate_limiter import RateLimiter
 
 
 @pytest.fixture
