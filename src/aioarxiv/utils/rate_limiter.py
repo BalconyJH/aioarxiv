@@ -1,7 +1,7 @@
 import asyncio
 from dataclasses import dataclass
 from types import TracebackType
-from typing import ClassVar, Optional
+from typing import Optional
 
 from ..config import default_config
 from .log import logger
@@ -23,21 +23,13 @@ class RateLimiter:
     用于限制请求速率，防止过多请求导致服务器拒绝服务。
 
     Attributes:
-        DEFAULT_CALLS: ClassVar[int]: 默认窗口期内的最大请求数
-        DEFAULT_PERIOD: ClassVar[float]: 默认窗口期
-        calls: int: 窗口期内的最大请求数
-        period: float: 窗口期
-        timestamps: list[float]: 请求时间戳列表
-        _lock: asyncio.Lock: 锁
-        _last_check: Optional[float]: 上次检查时间
-        _logger: logging.Logger: 日志记录器
+        calls: 窗口期内的最大请求数
+        period: 窗口期 (秒)
+        __timestamps: 请求时间戳列表
+        __lock: 速率限制器锁
     """
 
-    # 从配置获取默认值
-    DEFAULT_CALLS: ClassVar[int] = default_config.rate_limit_calls
-    DEFAULT_PERIOD: ClassVar[float] = default_config.rate_limit_period
-
-    def __init__(self, calls: int = DEFAULT_CALLS, period: float = DEFAULT_PERIOD):
+    def __init__(self, calls: Optional[int] = None, period: Optional[float] = None):
         """
         初始化速率限制器
 
@@ -45,16 +37,10 @@ class RateLimiter:
             calls: 窗口期内的最大请求数，默认从配置获取
             period: 窗口期，默认从配置获取
         """
-        if calls <= 0:
-            raise ValueError("calls must be positive")
-        if period <= 0:
-            raise ValueError("period must be positive")
-        self.calls = calls
-        self.period = period
-        self.timestamps: list[float] = []
-        self._lock = asyncio.Lock()
-        self._last_check: Optional[float] = None
-        self._logger = logger
+        self.calls = calls or default_config.rate_limit_calls
+        self.period = period or default_config.rate_limit_period
+        self.__timestamps: list[float] = []
+        self.__lock = asyncio.Lock()
 
     @property
     def is_limited(self) -> bool:
@@ -72,55 +58,45 @@ class RateLimiter:
     def _get_valid_timestamps(self, now: float) -> list[float]:
         """获取有效的时间戳列表"""
         return [t for t in self.timestamps if now - t <= self.period]
+        return [t for t in self.__timestamps if now - t < self.period]
 
     @property
     async def state(self) -> RateLimitState:
         """获取当前速率限制状态"""
-        async with self._lock:
+        async with self.__lock:
             now = asyncio.get_event_loop().time()
             valid_timestamps = self._get_valid_timestamps(now)
+            self.__timestamps = valid_timestamps
 
             return RateLimitState(
                 remaining=max(0, self.calls - len(valid_timestamps)),
-                reset_at=min(self.timestamps, default=now) + self.period
-                if self.timestamps
+                reset_at=min(valid_timestamps, default=now) + self.period
+                if self.__timestamps
                 else now,
                 window_start=now,
             )
 
     async def acquire(self) -> None:
         """获取访问许可"""
-        async with self._lock:
+        async with self.__lock:
             now = asyncio.get_event_loop().time()
+            valid_stamps = self._get_valid_timestamps(now)
+            self.__timestamps = valid_stamps
 
-            self.timestamps = self._get_valid_timestamps(now)
-
-            # 检查是否需要等待
-            if len(self.timestamps) >= self.calls:
-                sleep_time = self.timestamps[0] + self.period - now
+            if len(valid_stamps) >= self.calls:
+                sleep_time = valid_stamps[0] + self.period - now
                 if sleep_time > 0:
-                    self._logger.debug(
+                    logger.debug(
                         "触发速率限制",
                         extra={
                             "wait_time": f"{sleep_time:.2f}s",
-                            "current_calls": len(self.timestamps),
+                            "current_calls": len(valid_stamps),
                             "max_calls": self.calls,
                         },
                     )
                     await asyncio.sleep(sleep_time)
 
-            self.timestamps.append(now)
-            self._last_check = now
-
-            self._logger.debug(
-                "获取访问许可",
-                extra={
-                    "remaining_calls": self.calls - len(self.timestamps),
-                    "window_reset_in": f"{(self.timestamps[0] + self.period - now):.2f}s"
-                    if self.timestamps
-                    else "0s",
-                },
-            )
+            self.__timestamps.append(asyncio.get_event_loop().time())
 
     async def __aenter__(self) -> "RateLimiter":
         """进入速率限制上下文"""
