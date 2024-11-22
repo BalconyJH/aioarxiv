@@ -43,21 +43,17 @@ class RateLimiter:
         self.__lock = asyncio.Lock()
 
     @property
-    def is_limited(self) -> bool:
+    async def is_limited(self) -> bool:
         """当前是否处于限制状态"""
         # 使用当前时间作为参考点
-        loop = asyncio.get_running_loop()
-        now = loop.time()
-
-        # 获取有效时间戳并更新
-        valid_stamps = [t for t in self.timestamps if (now - t) < self.period]
-        self.timestamps = valid_stamps
-
-        return len(valid_stamps) >= self.calls
+        async with self.__lock:
+            now = asyncio.get_event_loop().time()
+            valid_stamps = self._get_valid_timestamps(now)
+            self.__timestamps = valid_stamps
+            return len(valid_stamps) >= self.calls
 
     def _get_valid_timestamps(self, now: float) -> list[float]:
         """获取有效的时间戳列表"""
-        return [t for t in self.timestamps if now - t <= self.period]
         return [t for t in self.__timestamps if now - t < self.period]
 
     @property
