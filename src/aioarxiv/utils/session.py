@@ -12,7 +12,6 @@ from aiohttp import (
 
 from ..config import ArxivConfig, default_config
 from ..utils import create_trace_config
-from .log import logger
 from .rate_limiter import RateLimiter
 
 
@@ -47,8 +46,7 @@ class SessionManager:
     @asynccontextmanager
     async def rate_limited_context(self) -> AsyncIterator[None]:
         """获取速率限制上下文"""
-        limiter = RateLimiter()
-        await limiter.acquire()
+        await self._rate_limiter.acquire()
         yield
 
     async def get_session(self) -> ClientSession:
@@ -77,13 +75,10 @@ class SessionManager:
         Returns:
             ClientResponse: aiohttp 响应对象
         """
-        session = await self.get_session()
+        session = await self.get_session() or self._session
 
         if self._rate_limiter:
             await self._rate_limiter.acquire()
-
-        if self._config.proxy:
-            logger.debug(f"使用代理: {self._config.proxy}")
 
         return await session.request(
             method, url, proxy=self._config.proxy or None, **kwargs
