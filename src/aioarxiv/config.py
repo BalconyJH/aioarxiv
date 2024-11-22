@@ -11,8 +11,12 @@ class ArxivConfig(BaseModel):
     )
     timeout: float = Field(default=30.0, description="请求超时时间(秒)", gt=0)
     max_retries: int = Field(default=3, description="最大重试次数", ge=0)
-    rate_limit_calls: int = Field(default=5, description="速率限制窗口内的最大请求数")
-    rate_limit_period: float = Field(default=1.0, description="速率限制窗口期(秒)")
+    rate_limit_calls: int = Field(
+        default=5, description="速率限制窗口内的最大请求数", ge=0
+    )
+    rate_limit_period: float = Field(
+        default=1.0, description="速率限制窗口期(秒)", ge=0
+    )
     max_concurrent_requests: int = Field(default=5, description="最大并发请求数")
     proxy: Optional[str] = Field(default=None, description="HTTP/HTTPS代理URL")
     log_level: str = Field(default="INFO", description="日志等级")
