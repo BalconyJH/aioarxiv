@@ -56,6 +56,11 @@ class RateLimiter:
         """获取有效的时间戳列表"""
         return [t for t in self.__timestamps if now - t < self.period]
 
+    async def get_timestamp_count(self) -> int:
+        """获取当前时间戳数量"""
+        async with self.__lock:
+            return len(self.__timestamps)
+
     @property
     async def state(self) -> RateLimitState:
         """获取当前速率限制状态"""
