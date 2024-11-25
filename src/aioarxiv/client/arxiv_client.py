@@ -104,8 +104,6 @@ class ArxivClient:
         Raises:
             QueryBuildError: 如果构建查询参数失败
         """
-        self._validate_params(params, start)
-
         try:
             page_size = min(
                 self._config.page_size,
@@ -138,26 +136,6 @@ class ArxivClient:
                     field_name="page_size",
                 ),
                 original_error=e,
-            )
-
-    def _validate_params(self, params: SearchParams, start: int) -> None:
-        """验证查询参数"""
-        if not params.query:
-            raise QueryBuildError(
-                message="搜索查询不能为空",
-                context=QueryContext(
-                    params={"query": None}, field_name="query", constraint="required"
-                ),
-            )
-
-        if start < 0:
-            raise QueryBuildError(
-                message="起始位置不能为负数",
-                context=QueryContext(
-                    params={"start": start},
-                    field_name="start",
-                    constraint="non_negative",
-                ),
             )
 
     async def parse_response(self, response: ClientResponse) -> tuple[list[Paper], int]:
