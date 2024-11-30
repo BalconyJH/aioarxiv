@@ -1,8 +1,8 @@
-from dataclasses import dataclass
 from http import HTTPStatus
 from typing import Any, Optional
+from dataclasses import dataclass
 
-from pydantic import BaseModel, HttpUrl
+from pydantic import HttpUrl, BaseModel
 
 
 class ArxivException(Exception):
@@ -60,9 +60,9 @@ class ValidationException(ArxivException):
 
         if self.validation_errors:
             error_msg.append("Detailed errors:")
-            for key, err in self.validation_errors.items():
-                error_msg.append(f"  - {key}: {err}")
-
+            error_msg.extend(
+                f"  - {key}: {err}" for key, err in self.validation_errors.items()
+            )
         return "\n".join(error_msg)
 
 
@@ -173,24 +173,33 @@ class QueryBuildError(ArxivException):
         super().__init__(message)
 
     def __str__(self) -> str:
-        parts = [f"查询构建错误: {self.message}"]
+        error_parts = [f"查询构建错误: {self.message}"]
 
         if self.context:
-            parts.append("查询参数:")
-            for k, v in self.context.params.items():
-                parts.append(f"  {k}: {v}")
+            if self.context.params:
+                error_parts.append("参数:")
+                error_parts.extend(
+                    f"  • {k}: {v!r}" for k, v in self.context.params.items()
+                )
 
             if self.context.field_name:
-                parts.append(f"问题字段: {self.context.field_name}")
+                error_parts.append(f"问题字段: {self.context.field_name}")
+
             if self.context.value is not None:
-                parts.append(f"问题值: {self.context.value}")
+                error_parts.append(f"问题值: {self.context.value!r}")
+
             if self.context.constraint:
-                parts.append(f"违反约束: {self.context.constraint}")
+                error_parts.append(f"约束条件: {self.context.constraint}")
 
         if self.original_error:
-            parts.append(f"原始错误: {self.original_error!s}")
+            error_parts.extend(
+                [
+                    f"原始错误: {self.original_error!s}",
+                    f"原始错误类型: {type(self.original_error).__name__}",
+                ]
+            )
 
-        return "\n".join(parts)
+        return "\n".join(error_parts)
 
 
 @dataclass
@@ -237,8 +246,10 @@ class ParserException(Exception):
 
         return "\n".join(parts)
 
+
 class SearchCompleteException(ArxivException):
     """搜索完成异常"""
+
     def __init__(self, total_results: int):
         self.total_results = total_results
         super().__init__(f"搜索完成,共获取{total_results}条结果")
