@@ -1,9 +1,11 @@
+import sys
 import inspect
 import logging
-import sys
 from typing import TYPE_CHECKING
 
 import loguru
+
+from ..config import default_config
 
 if TYPE_CHECKING:
     # avoid sphinx autodoc resolve annotation failed
@@ -48,7 +50,7 @@ class LoguruHandler(logging.Handler):  # pragma: no cover
 
 def default_filter(record: "Record"):
     """默认的日志过滤器，根据 `config.log_level` 配置改变日志等级。"""
-    log_level = record["extra"].get("log_level", "INFO")
+    log_level = record["extra"].get("arxiv_log_level", default_config.log_level)
     levelno = logger.level(log_level).no if isinstance(log_level, str) else log_level
     return record["level"].no >= levelno
 
@@ -57,7 +59,7 @@ default_format: str = (
     "<g>{time:MM-DD HH:mm:ss}</g> "
     "[<lvl>{level}</lvl>] "
     "<c><u>{name}</u></c> | "
-    # "<c>{function}:{line}</c>| "
+    "<c>{function}:{line}</c>| "
     "{message}"
 )
 """默认日志格式"""
