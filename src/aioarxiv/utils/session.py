@@ -1,18 +1,12 @@
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
-from types import TracebackType
 from typing import Optional
+from types import TracebackType
 
-from aiohttp import (
-    ClientResponse,
-    ClientSession,
-    ClientTimeout,
-    TraceConfig,
-)
+from aiohttp import TraceConfig, ClientSession, ClientTimeout, ClientResponse
 
-from ..config import ArxivConfig, default_config
-from ..utils import create_trace_config
+from .log import logger
 from .rate_limiter import RateLimiter
+from ..utils import create_trace_config
+from ..config import ArxivConfig, default_config
 
 
 class SessionManager:
@@ -20,7 +14,6 @@ class SessionManager:
         self,
         config: Optional[ArxivConfig] = None,
         session: Optional[ClientSession] = None,
-        rate_limiter: Optional[RateLimiter] = None,
         trace_config: Optional[TraceConfig] = None,
     ):
         """
@@ -29,7 +22,6 @@ class SessionManager:
         Args:
             config: arXiv API配置对象
             session: aiohttp会话
-            rate_limiter: 速率限制器
             trace_config: 请求追踪配置
         """
         self._config = config or default_config
@@ -37,17 +29,7 @@ class SessionManager:
             total=self._config.timeout,
         )
         self._session = session
-        self._rate_limiter = rate_limiter or RateLimiter(
-            calls=self._config.rate_limit_calls,
-            period=self._config.rate_limit_period,
-        )
         self._trace_config = trace_config or create_trace_config()
-
-    @asynccontextmanager
-    async def rate_limited_context(self) -> AsyncIterator[None]:
-        """获取速率限制上下文"""
-        await self._rate_limiter.acquire()
-        yield
 
     async def get_session(self) -> ClientSession:
         """
@@ -63,26 +45,26 @@ class SessionManager:
             )
         return self._session
 
+    @RateLimiter.limit()
     async def request(self, method: str, url: str, **kwargs) -> ClientResponse:
         """
         发送受速率限制的请求
 
         Args:
-            method: HTTP 方法
+            method: HTTP方法
             url: 请求URL
-            **kwargs: 传递给 aiohttp.ClientSession.request 的额外参数
+            **kwargs: 传递给session.request的额外参数
 
         Returns:
-            ClientResponse: aiohttp 响应对象
+            ClientResponse: aiohttp响应对象
         """
-        session = await self.get_session() or self._session
+        session = await self.get_session()
 
-        if self._rate_limiter:
-            await self._rate_limiter.acquire()
+        if self._config.proxy:
+            logger.trace(f"使用代理: {self._config.proxy}")
+            kwargs["proxy"] = self._config.proxy
 
-        return await session.request(
-            method, url, proxy=self._config.proxy or None, **kwargs
-        )
+        return await session.request(method, url, **kwargs)
 
     async def close(self) -> None:
         """关闭会话"""
