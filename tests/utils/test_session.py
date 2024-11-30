@@ -1,154 +1,104 @@
-# tests/utils/test_session.py
+import asyncio
 
 import pytest
-from aiohttp import ClientResponse, ClientSession, ClientTimeout
-from pytest_mock import MockerFixture
-
-from src.aioarxiv.config import ArxivConfig
-from src.aioarxiv.utils.rate_limiter import RateLimiter
-from src.aioarxiv.utils.session import SessionManager
+from aiohttp import ClientSession, ClientResponse
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def config():
-    return ArxivConfig(
-        timeout=30,
-        rate_limit_calls=3,
-        rate_limit_period=1,
-    )
+    from aioarxiv.config import ArxivConfig
+
+    return ArxivConfig(timeout=30.0, proxy="http://proxy.example.com")
 
 
 @pytest.fixture
-def rate_limiter():
-    return RateLimiter(calls=3, period=1)
+def mock_session(mocker):
+    """模拟会话"""
+    session = mocker.AsyncMock(spec=ClientSession)
+    session.closed = False
+    return session
 
 
-@pytest.fixture
-async def session_manager(config, rate_limiter):
-    manager = SessionManager(config=config, rate_limiter=rate_limiter)
-    yield manager
-    await manager.close()
+@pytest.fixture(autouse=True)
+async def _reset_rate_limiter():
+    """重置速率限制器状态"""
+    from aioarxiv.utils.rate_limiter import RateLimiter
 
-
-@pytest.mark.asyncio
-async def test_init_with_config(config):
-    """测试使用配置初始化"""
-    manager = SessionManager(config=config)
-    assert manager._config == config
-    assert isinstance(manager._timeout, ClientTimeout)
-    assert manager._timeout.total == config.timeout
-
-
-@pytest.mark.asyncio
-async def test_get_session(session_manager):
-    """测试获取会话"""
-    session = await session_manager.get_session()
-    assert isinstance(session, ClientSession)
-    assert not session.closed
+    RateLimiter.timestamps.clear()
+    RateLimiter._calls = 5
+    RateLimiter._period = 1.0
+    RateLimiter._semaphore = asyncio.Semaphore(5)
+    RateLimiter._lock = asyncio.Lock()
+    return
 
 
 @pytest.mark.asyncio
-async def test_reuse_existing_session(session_manager):
-    """测试复用现有会话"""
-    session1 = await session_manager.get_session()
-    session2 = await session_manager.get_session()
-    assert session1 is session2
+async def test_request(mock_session, mocker):
+    """测试请求方法"""
+    from aioarxiv.utils.session import SessionManager
 
-
-@pytest.mark.asyncio
-async def test_rate_limited_context(session_manager, mocker: MockerFixture):
-    """测试速率限制上下文"""
-    mock_limiter = mocker.patch.object(RateLimiter, "acquire")
-
-    async with session_manager.rate_limited_context():
-        pass
-
-    mock_limiter.assert_awaited_once()
-
-
-@pytest.mark.asyncio
-async def test_close(session_manager):
-    """测试关闭会话"""
-    session = await session_manager.get_session()
-    assert not session.closed
-
-    await session_manager.close()
-    assert session.closed
-    assert session_manager._session is None
-
-
-@pytest.mark.asyncio
-async def test_context_manager(session_manager):
-    """测试上下文管理器"""
-    async with session_manager as manager:
-        session = await manager.get_session()
-        assert not session.closed
-
-    assert session.closed
-
-
-@pytest.mark.asyncio
-async def test_request(session_manager, mocker: MockerFixture):
-    """测试请求方法(包含速率限制)"""
-    # 1. 模拟响应
     mock_response = mocker.AsyncMock(spec=ClientResponse)
 
-    # 2. 模拟会话
-    mock_session = mocker.AsyncMock(spec=ClientSession)
-    mock_session.request = mocker.AsyncMock(return_value=mock_response)
+    async def mock_request(*args, **kwargs):
+        return mock_response
 
-    # 3. 模拟 get_session
-    async def mock_get_session():
-        return mock_session
+    mock_session.request = mocker.AsyncMock(side_effect=mock_request)
 
-    session_manager.get_session = mock_get_session
-
-    # 4. 模拟速率限制器
-    mock_acquire = mocker.AsyncMock()
-    session_manager._rate_limiter.acquire = mock_acquire
-
-    # 5. 执行请求
-    response = await session_manager.request("GET", "http://example.com")
-
-    # 6. 验证
-    assert response == mock_response
-    mock_acquire.assert_awaited_once()
-    mock_session.request.assert_called_once_with(
-        "GET", "http://example.com", proxy=None
-    )
+    async with SessionManager(session=mock_session) as manager:
+        response = await manager.request("GET", "http://example.com")
+        mock_session.request.assert_called_once_with("GET", "http://example.com")
+        assert response == mock_response
 
 
 @pytest.mark.asyncio
-async def test_request_creates_new_session_if_closed(session_manager):
-    """测试请求时如果会话已关闭则创建新会话"""
-    session1 = await session_manager.get_session()
-    await session1.close()
+async def test_request_with_proxy(mock_session, mocker, config):
+    """测试代理请求"""
+    from aioarxiv.utils.session import SessionManager
 
-    session2 = await session_manager.get_session()
-    assert session2 is not session1
-    assert not session2.closed
-
-
-@pytest.mark.asyncio
-async def test_request_with_proxy(session_manager, mocker: MockerFixture):
-    """测试请求方法(包含代理)"""
     mock_response = mocker.AsyncMock(spec=ClientResponse)
-    mock_session = mocker.AsyncMock(spec=ClientSession)
-    mock_session.request = mocker.AsyncMock(return_value=mock_response)
 
-    async def mock_get_session():
-        return mock_session
+    async def mock_request(*args, **kwargs):
+        return mock_response
 
-    session_manager.get_session = mock_get_session
+    mock_session.request = mocker.AsyncMock(side_effect=mock_request)
 
-    mock_acquire = mocker.AsyncMock()
-    session_manager._rate_limiter.acquire = mock_acquire
+    async with SessionManager(config=config, session=mock_session) as manager:
+        await manager.request("GET", "http://example.com")
+        mock_session.request.assert_called_once_with(
+            "GET", "http://example.com", proxy="http://proxy.example.com"
+        )
 
-    session_manager._config.proxy = "http://proxy.com"
-    response = await session_manager.request("GET", "http://example.com")
 
-    assert response == mock_response
-    mock_acquire.assert_awaited_once()
-    mock_session.request.assert_called_once_with(
-        "GET", "http://example.com", proxy="http://proxy.com"
+@pytest.mark.asyncio
+async def test_rate_limiting(mocker):
+    """测试速率限制"""
+    from aioarxiv.utils.session import SessionManager
+    from aioarxiv.utils.rate_limiter import RateLimiter
+
+    RateLimiter.timestamps.clear()
+    RateLimiter._calls = 2
+    RateLimiter._period = 1.0
+    RateLimiter._semaphore = asyncio.Semaphore(2)
+    RateLimiter._lock = asyncio.Lock()
+
+    mock_response = mocker.AsyncMock(spec=ClientResponse)
+    mock_sleep = mocker.patch("asyncio.sleep", new_callable=mocker.AsyncMock)
+    mock_request = mocker.patch(
+        "aiohttp.ClientSession.request",
+        new_callable=mocker.AsyncMock,
+        return_value=mock_response,
     )
+
+    async with SessionManager() as manager:
+        await asyncio.gather(
+            *(
+                manager.request("GET", "http://export.arxiv.org/api/query")
+                for _ in range(3)
+            )
+        )
+
+        assert mock_sleep.call_count >= 1
+        assert mock_request.call_count == 3
+
+        sleep_calls = [call.args[0] for call in mock_sleep.call_args_list]
+        assert all(duration > 0 for duration in sleep_calls)

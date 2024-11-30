@@ -1,74 +1,133 @@
 import asyncio
+from time import time
+from unittest.mock import patch
 
 import pytest
-
-from src.aioarxiv.utils.rate_limiter import RateLimiter
+from aioarxiv.utils.rate_limiter import RateLimiter
 
 
 @pytest.fixture
 def rate_limiter():
-    return RateLimiter(calls=3, period=1.0)
+    # 重置类级别状态
+    RateLimiter.timestamps.clear()
+    RateLimiter._calls = 5
+    RateLimiter._period = 1.0
+    return RateLimiter
 
 
-class TestRateLimiter:
-    @pytest.mark.asyncio
-    async def test_acquire_within_limit(self, rate_limiter):
-        """测试在限制范围内获取许可"""
-        for _ in range(rate_limiter.calls):
-            await rate_limiter.acquire()
-        assert await rate_limiter.get_timestamp_count() == rate_limiter.calls
+@pytest.fixture(autouse=True)
+async def _setup_limiter():
+    """设置和清理限制器状态"""
+    RateLimiter.timestamps.clear()
+    RateLimiter._calls = 0
+    RateLimiter._period = 0.0
+    RateLimiter._lock = asyncio.Lock()
+    RateLimiter._semaphore = asyncio.Semaphore(1)
+    yield
+    # 清理
+    RateLimiter.timestamps.clear()
 
-    @pytest.mark.asyncio
-    async def test_acquire_exceeds_limit(self, rate_limiter):
-        """测试超出限制时的等待"""
-        start_time = asyncio.get_event_loop().time()
 
-        for _ in range(rate_limiter.calls):
-            await rate_limiter.acquire()
+@pytest.mark.asyncio
+async def test_basic_rate_limiting(rate_limiter):
+    """测试基本的速率限制功能"""
+    calls = []
 
-        await rate_limiter.acquire()
+    @rate_limiter.limit(calls=2, period=1.0)
+    async def test_func():
+        calls.append(time())
+        return len(calls)
 
-        elapsed = asyncio.get_event_loop().time() - start_time
-        assert elapsed >= rate_limiter.period
+    results = await asyncio.gather(test_func(), test_func(), test_func())
 
-    @pytest.mark.asyncio
-    async def test_state(self, rate_limiter):
-        """测试速率限制状态"""
-        state = await rate_limiter.state
-        assert state.remaining == rate_limiter.calls
+    assert results == [1, 2, 3]
+    assert len(calls) == 3
+    assert calls[1] - calls[0] < 1.0
+    assert calls[2] - calls[1] >= 1.0
 
-        await rate_limiter.acquire()
-        state = await rate_limiter.state
-        assert state.remaining == rate_limiter.calls - 1
 
-    @pytest.mark.asyncio
-    async def test_context_manager(self, rate_limiter):
-        """测试上下文管理器"""
-        async with rate_limiter as limiter:
-            assert isinstance(limiter, RateLimiter)
-            assert await rate_limiter.get_timestamp_count() == 1
+@pytest.mark.asyncio
+async def test_concurrent_requests(rate_limiter):
+    """测试并发请求控制"""
+    concurrent_count = 0
+    max_concurrent = 0
 
-    @pytest.mark.asyncio
-    async def test_window_sliding(self, rate_limiter):
-        """测试时间窗口滑动"""
-        for _ in range(rate_limiter.calls):
-            await rate_limiter.acquire()
+    @rate_limiter.limit(calls=3)
+    async def test_func():
+        nonlocal concurrent_count, max_concurrent
+        concurrent_count += 1
+        max_concurrent = max(max_concurrent, concurrent_count)
+        await asyncio.sleep(0.1)
+        concurrent_count -= 1
+        return concurrent_count
 
-        await asyncio.sleep(rate_limiter.period)
+    tasks = [test_func() for _ in range(10)]
+    await asyncio.gather(*tasks)
 
-        start = asyncio.get_event_loop().time()
-        await rate_limiter.acquire()
-        elapsed = asyncio.get_event_loop().time() - start
-        assert elapsed < 0.1
+    assert max_concurrent <= 3
 
-    @pytest.mark.asyncio
-    async def test_is_limited(self, rate_limiter):
-        """测试是否处于限制状态"""
-        assert not await rate_limiter.is_limited
 
-        for _ in range(rate_limiter.calls):
-            await rate_limiter.acquire()
-        assert await rate_limiter.is_limited
+@pytest.mark.asyncio
+async def test_window_sliding(rate_limiter):
+    """测试时间窗口滑动"""
+    calls = []
 
-        await asyncio.sleep(rate_limiter.period)
-        assert not await rate_limiter.is_limited
+    @rate_limiter.limit(calls=2, period=1.0)
+    async def test_func():
+        calls.append(time())
+        return len(calls)
+
+    with patch("asyncio.sleep") as mock_sleep:
+        # 模拟时间流逝
+        mock_sleep.side_effect = lambda x: None
+
+        await test_func()
+        await test_func()
+
+        await test_func()
+
+        mock_sleep.assert_called_once()
+        args = mock_sleep.call_args[0]
+        assert 0 < args[0] <= 1.0
+
+
+@pytest.mark.asyncio
+async def test_error_handling(rate_limiter):
+    """测试错误处理"""
+
+    @rate_limiter.limit(calls=1)
+    async def failing_func():
+        raise ValueError("Test error")
+
+    with pytest.raises(ValueError, match="Test error"):
+        await failing_func()
+
+    assert len(RateLimiter.timestamps) == 1
+
+
+@pytest.mark.asyncio
+async def test_state_sharing():
+    """测试多个装饰器实例共享状态"""
+    calls_a = []
+    calls_b = []
+
+    @RateLimiter.limit(calls=2, period=1.0)
+    async def func_a():
+        calls_a.append(time())
+        await asyncio.sleep(0.1)
+
+    @RateLimiter.limit(calls=2, period=1.0)
+    async def func_b():
+        calls_b.append(time())
+        await asyncio.sleep(0.1)
+
+    await func_a()
+    await func_b()
+    await asyncio.sleep(1.1)
+    await func_a()
+    await func_b()
+
+    assert len(calls_a) == 2
+    assert len(calls_b) == 2
+    timestamps = sorted(calls_a + calls_b)
+    assert timestamps[2] - timestamps[0] >= 1.0
