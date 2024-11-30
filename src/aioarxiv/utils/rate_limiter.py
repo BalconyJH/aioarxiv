@@ -1,15 +1,24 @@
 import asyncio
+import functools
+from collections import deque
 from dataclasses import dataclass
-from types import TracebackType
-from typing import Optional
+from typing import Any, Callable, ClassVar, Optional, TypeVar, cast
 
 from ..config import default_config
 from .log import logger
 
+T = TypeVar("T", bound=Callable[..., Any])
+
 
 @dataclass
 class RateLimitState:
-    """速率限制状态"""
+    """速率限制状态
+
+    Attributes:
+        remaining: 剩余可用请求数
+        reset_at: 下次重置时间
+        window_start: 当前窗口开始时间
+    """
 
     remaining: int
     reset_at: float
@@ -17,98 +26,99 @@ class RateLimitState:
 
 
 class RateLimiter:
-    """
-    速率限制器
+    """速率限制装饰器，使用类级别共享状态实现请求限流
 
-    用于限制请求速率，防止过多请求导致服务器拒绝服务。
+    使用类级别变量确保所有实例共享同一个限流状态。支持并发控制和时间窗口限流。
 
     Attributes:
-        calls: 窗口期内的最大请求数
-        period: 窗口期 (秒)
-        __timestamps: 请求时间戳列表
-        __lock: 速率限制器锁
+        timestamps: 请求时间戳队列
+        _lock: 用于保护共享状态的锁
+        _semaphore: 控制并发请求数的信号量
+        _calls: 时间窗口内允许的最大请求数
+        _period: 时间窗口大小(秒)
     """
 
-    def __init__(self, calls: Optional[int] = None, period: Optional[float] = None):
-        """
-        初始化速率限制器
+    timestamps: ClassVar[deque[float]] = deque()
+    _lock: ClassVar[asyncio.Lock] = asyncio.Lock()
+    _semaphore: ClassVar[asyncio.Semaphore] = asyncio.Semaphore(1)
+    _calls: ClassVar[int] = 0
+    _period: ClassVar[float] = 0.0
+
+    @classmethod
+    def _clean_expired(cls, now: float) -> None:
+        """清理过期的时间戳
 
         Args:
-            calls: 窗口期内的最大请求数，默认从配置获取
-            period: 窗口期，默认从配置获取
+            now: 当前时间戳
         """
-        self.calls = calls or default_config.rate_limit_calls
-        self.period = period or default_config.rate_limit_period
-        self.__timestamps: list[float] = []
-        self.__lock = asyncio.Lock()
+        cutoff = now - cls._period
+        while cls.timestamps and cls.timestamps[0] <= cutoff:
+            cls.timestamps.popleft()
 
-    @property
-    async def is_limited(self) -> bool:
-        """当前是否处于限制状态"""
-        # 使用当前时间作为参考点
-        async with self.__lock:
-            now = asyncio.get_event_loop().time()
-            valid_stamps = self._get_valid_timestamps(now)
-            self.__timestamps = valid_stamps
-            return len(valid_stamps) >= self.calls
+    @classmethod
+    async def _wait_if_needed(cls, now: float) -> float:
+        """根据需要等待并返回新的当前时间
 
-    def _get_valid_timestamps(self, now: float) -> list[float]:
-        """获取有效的时间戳列表"""
-        return [t for t in self.__timestamps if now - t < self.period]
+        Args:
+            now: 当前时间戳
 
-    async def get_timestamp_count(self) -> int:
-        """获取当前时间戳数量"""
-        async with self.__lock:
-            return len(self.__timestamps)
+        Returns:
+            float: 等待后的新时间戳
+        """
+        if len(cls.timestamps) >= cls._calls:
+            wait_time = cls.timestamps[0] + cls._period - now
+            if wait_time > 0:
+                logger.debug(
+                    f"触发速率限制，等待{wait_time:.2f}秒",
+                    extra={
+                        "wait_time": f"{wait_time:.2f}s",
+                        "current_calls": len(cls.timestamps),
+                        "max_calls": cls._calls,
+                        "period": cls._period,
+                    },
+                )
+                await asyncio.sleep(wait_time)
+                return asyncio.get_event_loop().time()
+        return now
 
-    @property
-    async def state(self) -> RateLimitState:
-        """获取当前速率限制状态"""
-        async with self.__lock:
-            now = asyncio.get_event_loop().time()
-            valid_timestamps = self._get_valid_timestamps(now)
-            self.__timestamps = valid_timestamps
+    @classmethod
+    def limit(
+        cls, calls: Optional[int] = None, period: Optional[float] = None
+    ) -> Callable[[T], T]:
+        """创建速率限制装饰器
 
-            return RateLimitState(
-                remaining=max(0, self.calls - len(valid_timestamps)),
-                reset_at=min(valid_timestamps, default=now) + self.period
-                if self.__timestamps
-                else now,
-                window_start=now,
-            )
+        Args:
+            calls: 时间窗口内最大请求数，默认使用配置值
+            period: 时间窗口大小(秒)，默认使用配置值
 
-    async def acquire(self) -> None:
-        """获取访问许可"""
-        async with self.__lock:
-            now = asyncio.get_event_loop().time()
-            valid_stamps = self._get_valid_timestamps(now)
-            self.__timestamps = valid_stamps
+        Returns:
+            装饰器函数
+        """
+        cls._calls = calls or default_config.rate_limit_calls
+        cls._period = period or default_config.rate_limit_period
+        cls.timestamps = deque(maxlen=cls._calls)
+        cls._semaphore = asyncio.Semaphore(cls._calls)
 
-            if len(valid_stamps) >= self.calls:
-                sleep_time = valid_stamps[0] + self.period - now
-                if sleep_time > 0:
+        def decorator(func: T) -> T:
+            @functools.wraps(func)
+            async def wrapper(*args: Any, **kwargs: Any) -> Any:
+                async with cls._semaphore, cls._lock:
+                    now = asyncio.get_event_loop().time()
+                    cls._clean_expired(now)
+                    now = await cls._wait_if_needed(now)
+                    cls.timestamps.append(now)
+
                     logger.debug(
-                        "触发速率限制",
+                        "请求通过限制器",
                         extra={
-                            "wait_time": f"{sleep_time:.2f}s",
-                            "current_calls": len(valid_stamps),
-                            "max_calls": self.calls,
+                            "current_calls": len(cls.timestamps),
+                            "max_calls": cls._calls,
+                            "remaining": cls._calls - len(cls.timestamps),
                         },
                     )
-                    await asyncio.sleep(sleep_time)
 
-            self.__timestamps.append(asyncio.get_event_loop().time())
+                return await func(*args, **kwargs)
 
-    async def __aenter__(self) -> "RateLimiter":
-        """进入速率限制上下文"""
-        await self.acquire()
-        return self
+            return cast(T, wrapper)
 
-    async def __aexit__(
-        self,
-        exc_type: Optional[type[BaseException]],
-        exc_val: Optional[BaseException],
-        exc_tb: Optional[TracebackType],
-    ) -> None:
-        """退出速率限制上下文"""
-        pass
+        return decorator
