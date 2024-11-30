@@ -1,12 +1,23 @@
-import xml.etree.ElementTree as ET
 from datetime import datetime
+import xml.etree.ElementTree as ET
 from typing import ClassVar, Optional, cast
 
-from pydantic import HttpUrl
+from aiohttp import ClientResponse
+from pydantic import AnyUrl, HttpUrl
 
-from ..exception import ParseErrorContext, ParserException
-from ..models import Author, Category, Paper
 from .log import logger
+from . import create_parser_exception
+from ..exception import ParserException
+from ..models import (
+    Paper,
+    Author,
+    Category,
+    Metadata,
+    BasicInfo,
+    SearchParams,
+    SearchResult,
+    PrimaryCategory,
+)
 
 
 class ArxivParser:
@@ -17,32 +28,123 @@ class ArxivParser:
         NS (ClassVar[dict[str, str]]): XML命名空间
 
     Args:
-        entry (ET.Element): 根元素
+        response_context: API响应内容
 
     Raises:
         ParserException: 如果解析失败
     """
+
     NS: ClassVar[dict[str, str]] = {
         "atom": "http://www.w3.org/2005/Atom",
         "opensearch": "http://a9.com/-/spec/opensearch/1.1/",
         "arxiv": "http://arxiv.org/schemas/atom",
     }
+
+    def __init__(self, response_context: str, raw_response: ClientResponse):
+        self.response_context = response_context
+        self.raw_response = raw_response
+        self.entry = ET.fromstring(response_context)  # Root element of the XML tree
+
+    @staticmethod
+    def build_paper(
+        data: ET.Element,
+    ) -> Paper:
+        """统一处理论文解析"""
+        parser = PaperParser(data)
+        basic_info = parser.parse_basics_info()
+        return Paper(
+            info=basic_info,
+            pdf_url=parser.parse_pdf_url(),
+            **parser.parse_optional_fields(),
+        )
+
+    def _parse_root(self) -> list[Paper]:
+        """
+        解析根元素
+
+        Returns:
+            tuple[list[Paper], int]: 论文列表和总结果数
+        """
+        papers = []
+        for i, entry in enumerate(self.entry.findall("atom:entry", ArxivParser.NS)):
+            try:
+                papers.append(self.build_paper(entry))
+            except Exception as e:
+                raise create_parser_exception(
+                    entry,
+                    str(self.raw_response.url),
+                    message=f"解析第 {i + 1} 篇论文失败",
+                    namespace=ArxivParser.NS["atom"],
+                    error=e,
+                ) from e
+
+        return papers
+
+    def parse_feed(self) -> list[Paper]:
+        """
+        解析arXiv API的Atom feed内容
+
+        Returns:
+            tuple[list[Paper], int]: 论文列表和总结果数
+        """
+        try:
+            return self._parse_root()
+        except ET.ParseError as e:
+            raise create_parser_exception(
+                self.entry,
+                str(self.raw_response.url),
+                message="解析失败",
+                error=e,
+            ) from e
+        except ParserException:
+            raise
+
+
+class RootParser:
+    def __init__(self, response_context: str):
+        self.response_context = response_context
+        self.entry = ET.fromstring(response_context)
+
+    def parse_total_result(self) -> int:
+        """
+        解析总结果数
+
+        Returns:
+            int: 总结果数
+
+        Raises:
+            ParserException: 如果解析失败
+        """
+        total_element = self.entry.find("opensearch:totalResults", ArxivParser.NS)
+        if total_element is None or total_element.text is None:
+            raise create_parser_exception(
+                self.entry,
+                "",
+                message="缺少总结果数元素",
+            )
+
+        return int(total_element.text)
+
+    def build_search_result(self, query_params: SearchParams) -> SearchResult:
+        return SearchResult(
+            papers=[],
+            total_result=self.parse_total_result(),
+            page=1,
+            has_next=False,
+            query_params=query_params,
+            metadata=Metadata(
+                missing_results=0,
+                pagesize=0,
+                source="arxiv",
+            ),
+        )
+
+
+class PaperParser:
+    """Paper解析器"""
+
     def __init__(self, entry: ET.Element):
         self.entry = entry
-
-    def _create_parser_exception(
-            self, message: str, url: str = "", error: Optional[Exception] = None
-    ) -> ParserException:
-        """创建解析异常"""
-        return ParserException(
-            url=url,
-            message=message,
-            context=ParseErrorContext(
-                raw_content=ET.tostring(self.entry, encoding="unicode"),
-                element_name=self.entry.tag,
-            ),
-            original_error=error,
-        )
 
     def parse_authors(self) -> list[Author]:
         """
@@ -50,42 +152,30 @@ class ArxivParser:
 
         Returns:
             list[Author]: 作者列表
-
-        Raises:
-            ParserException: 如果作者信息无效
         """
-        logger.debug("开始解析作者信息")
+
+        def get_text(element: ET.Element, tag: str, namespace: dict) -> Optional[str]:
+            """辅助函数，用于获取子元素的文本内容"""
+            sub_elem = element.find(tag, namespace)
+            return sub_elem.text if sub_elem is not None else None
+
         authors = []
-        for author_elem in self.entry.findall("atom:author", self.NS):
-            name = author_elem.find("atom:name", self.NS)
-            if name is not None and name.text:
-                authors.append(Author(name=name.text))
-            else:
-                logger.warning("发现作者信息不完整")
-        return authors
+        for author_elem in self.entry.findall("atom:author", ArxivParser.NS):
+            name = get_text(author_elem, "atom:name", ArxivParser.NS)
+            affiliation = get_text(author_elem, "arxiv:affiliation", ArxivParser.NS)
 
-    def parse_entry_id(self) -> str:
-        """解析论文ID
+            if name:
+                authors.append(Author(name=name, affiliation=affiliation))
 
-        Returns:
-            str: 论文ID
-
-        Raises:
-            ParserException: 如果ID元素缺失或无效
-        """
-        id_elem = self.entry.find("atom:id", self.NS)
-        if id_elem is None or id_elem.text is None:
-            raise ParserException(
-                url="",
-                message="缺少论文ID",
-                context=ParseErrorContext(
-                    raw_content=ET.tostring(self.entry, encoding="unicode"),
-                    element_name="id",
-                    namespace=self.NS["atom"],
-                ),
+        if not authors:
+            raise create_parser_exception(
+                self.entry,
+                "",
+                message="缺少作者信息",
             )
 
-        return id_elem.text
+        logger.trace(f"作者信息: {authors}")
+        return authors
 
     def parse_categories(self) -> Category:
         """
@@ -93,64 +183,86 @@ class ArxivParser:
 
         Returns:
             Category: 分类信息
-
-        Raises:
-            ParserException: 如果分类信息无效
         """
-        logger.debug("开始解析分类信息")
-        primary = self.entry.find("arxiv:primary_category", self.NS)
-        categories = self.entry.findall("atom:category", self.NS)
 
-        if primary is None or "term" not in primary.attrib:
-            logger.warning("未找到主分类信息，使用默认分类")
-            primary_category = "unknown"
-        else:
-            primary_category = primary.attrib["term"]
+        def parse_primary() -> PrimaryCategory:
+            """
+            解析主分类信息
 
-        return Category(
-            primary=primary_category,
-            secondary=[c.attrib["term"] for c in categories if "term" in c.attrib],
-        )
+            Returns:
+                PrimaryCategory: 主分类信息
+            """
+            primary_elem = self.entry.find("arxiv:primary_category", ArxivParser.NS)
 
-    def parse_required_fields(self) -> dict:
-        """
-        解析必要字段
+            if primary_elem is None or "term" not in primary_elem.attrib:
+                logger.warning("未找到主分类信息，使用默认分类")
+                return PrimaryCategory(term="unknown", scheme=None, label=None)
 
-        Returns:
-            dict: 必要字段字典
-
-        Raises:
-            ParserException: 如果字段缺失
-        """
-        fields = {
-            "title": self.entry.find("atom:title", self.NS),
-            "summary": self.entry.find("atom:summary", self.NS),
-            "published": self.entry.find("atom:published", self.NS),
-            "updated": self.entry.find("atom:updated", self.NS),
-        }
-
-        missing = [k for k, v in fields.items() if v is None or v.text is None]
-        if missing:
-            raise self._create_parser_exception(
-                f"缺少必要字段: {', '.join(missing)}"
+            return PrimaryCategory(
+                term=primary_elem.attrib["term"],
+                scheme=cast(AnyUrl, primary_elem.attrib.get("scheme")),
+                label=primary_elem.attrib.get("label"),
             )
 
-        return {
-            k: v.text for k, v in fields.items() if v is not None and v.text is not None
-        }
+        def parse_secondary() -> list[str]:
+            """
+            解析次级分类信息
 
-    def _parse_pdf_url(self) -> Optional[str]:
+            Returns:
+                list[str]: 次级分类列表
+            """
+            categories = self.entry.findall("atom:category", ArxivParser.NS)
+            primary_elem = self.entry.find("arxiv:primary_category", ArxivParser.NS)
+
+            return [
+                c.attrib["term"]
+                for c in categories
+                if "term" in c.attrib and c != primary_elem
+            ]
+
+        logger.trace(
+            f"主分类信息: {parse_primary().model_dump()}, "
+            f"次级分类信息: {parse_secondary()}"
+        )
+        return Category(primary=parse_primary(), secondary=parse_secondary())
+
+    def parse_basics_info(self) -> BasicInfo:
+        """
+        解析基础信息
+
+        Returns:
+            BasicInfo: 基础信息
+        """
+
+        def get_or_raise(element: ET.Element, tag: str) -> str:
+            sub_elem = element.find(f"atom:{tag}", ArxivParser.NS)
+            if sub_elem is None or sub_elem.text is None:
+                raise create_parser_exception(
+                    element,
+                    "",
+                    message=f"缺少 {tag} 元素",
+                )
+            return sub_elem.text
+
+        return BasicInfo(
+            id=get_or_raise(self.entry, "id").split("/")[-1],
+            title=get_or_raise(self.entry, "title"),
+            summary=get_or_raise(self.entry, "summary"),
+            authors=self.parse_authors(),
+            categories=self.parse_categories(),
+            published=self.parse_datetime(get_or_raise(self.entry, "published")),
+            updated=self.parse_datetime(get_or_raise(self.entry, "updated")),
+        )
+
+    def parse_pdf_url(self) -> Optional[HttpUrl]:
         """
         解析PDF链接
 
         Returns:
             Optional[str]: PDF链接或None
-
-        Raises:
-            ParserException: 如果PDF链接无效
         """
         try:
-            links = self.entry.findall("atom:link", self.NS)
+            links = self.entry.findall("atom:link", ArxivParser.NS)
             if not links:
                 logger.warning("未找到任何链接")
                 return None
@@ -166,36 +278,29 @@ class ArxivParser:
 
             if pdf_url is None:
                 logger.warning("未找到PDF链接")
+                return None
 
-            return pdf_url
+            return cast(HttpUrl, pdf_url)  # stupid type checker
 
         except (KeyError, AttributeError) as e:
-            logger.error("解析PDF链接失败", exc_info=True)
-            raise ParserException(
-                url="",
-                message="解析PDF链接失败",
-                context=ParseErrorContext(
-                    raw_content=ET.tostring(self.entry, encoding="unicode"),
-                    element_name="link",
-                    namespace=self.NS["atom"],
-                ),
-                original_error=e,
-            )
+            raise create_parser_exception(
+                self.entry,
+                "PDF链接解析失败",
+                namespace=ArxivParser.NS["atom"],
+                error=e,
+            ) from e
 
-    def parse_optional_fields(self) -> dict:
+    def parse_optional_fields(self) -> dict[str, Optional[str]]:
         """
         解析可选字段
 
         Returns:
             dict: 可选字段字典
-
-        Raises:
-            ParserException: 如果字段无效
         """
         fields = {
-            "comment": self.entry.find("arxiv:comment", self.NS),
-            "journal_ref": self.entry.find("arxiv:journal_ref", self.NS),
-            "doi": self.entry.find("arxiv:doi", self.NS),
+            "comment": self.entry.find("arxiv:comment", ArxivParser.NS),
+            "journal_ref": self.entry.find("arxiv:journal_ref", ArxivParser.NS),
+            "doi": self.entry.find("arxiv:doi", ArxivParser.NS),
         }
 
         return {k: v.text if v is not None else None for k, v in fields.items()}
@@ -218,122 +323,4 @@ class ArxivParser:
             normalized_date = date_str.replace("Z", "+00:00")
             return datetime.fromisoformat(normalized_date)
         except ValueError as e:
-            logger.error(f"日期解析失败: {date_str}", exc_info=True)
-            raise ValueError(f"无效的日期格式: {date_str}") from e
-
-    def build_paper(
-            self,
-            index: int,
-    ) -> Paper:
-        """统一处理论文解析"""
-        try:
-            required_fields = self.parse_required_fields()
-            return Paper(
-                id=self.parse_entry_id().split("/")[-1],
-                title=required_fields["title"],
-                summary=required_fields["summary"],
-                authors=self.parse_authors(),
-                categories=self.parse_categories(),
-                pdf_url=cast(HttpUrl, self._parse_pdf_url()),
-                published=self.parse_datetime(
-                    required_fields["published"].replace("Z", "+00:00")
-                ),
-                updated=self.parse_datetime(
-                    required_fields["updated"].replace("Z", "+00:00")
-                ),
-                **self.parse_optional_fields(),
-            )
-        except ParserException:
-            raise
-        except Exception as e:
-            raise ParserException(
-                url="",
-                message=f"解析第 {index + 1} 篇论文失败",
-                context=ParseErrorContext(
-                    raw_content=ET.tostring(self.entry, encoding="unicode"),
-                    position=index,
-                    element_name=self.entry.tag,
-                ),
-                original_error=e,
-            )
-
-    @classmethod
-    def _parse_root(
-            cls,
-            root: ET.Element,
-            url: str
-    ) -> tuple[list[Paper], int]:
-        """解析根元素"""
-        # 解析总结果数
-        total_element = root.find("opensearch:totalResults", cls.NS)
-        if total_element is None or total_element.text is None:
-            raise ParserException(
-                url=url,
-                message="缺少总结果数元素",
-                context=ParseErrorContext(
-                    raw_content=ET.tostring(root, encoding="unicode"),
-                    element_name="totalResults",
-                    namespace=cls.NS["opensearch"],
-                ),
-            )
-
-        total_results = int(total_element.text)
-
-        # 解析论文列表
-        papers = []
-        for i, entry in enumerate(root.findall("atom:entry", cls.NS)):
-            try:
-                parser = cls(entry)
-                papers.append(parser.build_paper(i))
-            except Exception as e:
-                raise ParserException(
-                    url=url,
-                    message=f"解析第 {i + 1} 篇论文失败",
-                    context=ParseErrorContext(
-                        raw_content=ET.tostring(entry, encoding="unicode"),
-                        position=i,
-                        element_name=entry.tag,
-                        namespace=cls.NS["atom"],
-                    ),
-                    original_error=e,
-                )
-
-        return papers, total_results
-
-    @classmethod
-    async def parse_feed(
-            cls,
-            content: str,
-            url: str = ""
-    ) -> tuple[list[Paper], int]:
-        """
-        解析arXiv API的Atom feed内容
-
-        Args:
-            content: XML内容
-            url: 请求URL,用于错误上下文
-
-        Returns:
-            tuple[list[Paper], int]: 论文列表和总结果数
-        """
-        logger.debug("开始解析feed内容")
-        try:
-            root = ET.fromstring(content)
-            return cls._parse_root(root, url)
-        except ET.ParseError as e:
-            logger.error("XML格式错误", exc_info=True)
-            raise ParserException(
-                url=url,
-                message="XML格式错误",
-                context=ParseErrorContext(raw_content=content),
-                original_error=e,
-            )
-        except ParserException:
-            raise
-        except Exception as e:
-            raise ParserException(
-                url=url,
-                message="未知解析错误",
-                context=ParseErrorContext(raw_content=content),
-                original_error=e,
-            )
+            raise ValueError(f"日期格式: {date_str} 不符合预期") from e
