@@ -1,26 +1,18 @@
-from collections.abc import AsyncGenerator
 from pathlib import Path
-from types import TracebackType
 from typing import Optional
+from datetime import datetime
+from types import TracebackType
+from collections.abc import AsyncGenerator
 
 from aiohttp import ClientResponse
 
-from ..config import ArxivConfig, default_config
-from ..exception import (
-    HTTPException,
-    ParseErrorContext,
-    ParserException,
-    QueryBuildError,
-    QueryContext,
-    SearchCompleteException,
-)
-from ..models import Paper, SearchParams
-from ..utils import logger
-from ..utils.parser import ArxivParser
-from ..utils.session import SessionManager
-from .base import BaseSearchManager
 from .downloader import ArxivDownloader
-from .search import ArxivSearchManager
+from ..utils.session import SessionManager
+from ..utils import logger, calculate_page_size
+from ..config import ArxivConfig, default_config
+from ..utils.parser import RootParser, ArxivParser
+from ..exception import QueryContext, HTTPException, QueryBuildError
+from ..models import Paper, SortOrder, SearchParams, SearchResult, SortCriterion
 
 
 class ArxivClient:
@@ -28,36 +20,99 @@ class ArxivClient:
         self,
         config: Optional[ArxivConfig] = None,
         session_manager: Optional[SessionManager] = None,
-        *,
-        search_manager_class: type[BaseSearchManager] = ArxivSearchManager,
     ):
         self._config = config or default_config
         self._session_manager = session_manager or SessionManager(config=self._config)
-        self._search_manager = search_manager_class(self)
         self._downloader = ArxivDownloader(self._session_manager)
+
+    def _build_search_metadata(
+        self,
+        searchresult: SearchResult,
+        page: int,
+        batch_size: int,
+        papers: list[Paper],
+    ) -> SearchResult:
+        """更新搜索结果元数据"""
+        has_next = searchresult.total_result > (page * batch_size)
+        return searchresult.model_copy(
+            update={
+                "papers": papers,
+                "page": page,
+                "has_next": has_next,
+                "metadata": searchresult.metadata.model_copy(
+                    update={
+                        "end_time": datetime.now(),
+                        "pagesize": self._config.page_size,
+                        "source": "arxiv",
+                    }
+                ),
+            }
+        )
+
+    @staticmethod
+    def _should_continue(
+        total_yielded: int,
+        max_results: Optional[int],
+        total_result: int,
+        page: int,
+        batch_size: int,
+    ) -> bool:
+        """检查是否继续获取下一页"""
+        if max_results and total_yielded >= max_results:
+            return False
+        return total_result > page * batch_size
 
     async def search(
         self,
         query: str,
+        id_list: Optional[list[str]] = None,
         max_results: Optional[int] = None,
-    ) -> AsyncGenerator[Paper, None]:
-        """执行搜索"""
-        params = SearchParams(query=query, max_results=max_results)
+        sort_by: Optional[SortCriterion] = None,
+        sort_order: Optional[SortOrder] = None,
+    ) -> AsyncGenerator[SearchResult, None]:
+        """执行arxiv搜索并返回结构化结果"""
+        params = SearchParams(
+            query=query,
+            id_list=id_list,
+            max_results=max_results,
+            sort_by=sort_by,
+            sort_order=sort_order,
+        )
 
-        try:
-            async with self._session_manager:
-                async for paper in self._search_manager.execute_search(params):
-                    yield paper
-        except SearchCompleteException:
-            return
+        total_yielded = 0
+        page = 1
 
-    async def _fetch_page(self, params: SearchParams, start: int) -> ClientResponse:
+        while True:
+            batch_size = calculate_page_size(
+                self._config.page_size, params.start, params.max_results
+            )
+            params.start = (page - 1) * batch_size
+
+            response = await self._fetch_page(params)
+            searchresult = RootParser(await response.text()).build_search_result(
+                query_params=params,
+            )
+            papers = await self.parse_response(response)
+
+            if not papers:
+                break
+
+            yield self._build_search_metadata(searchresult, page, batch_size, papers)
+
+            total_yielded += len(papers)
+            if not self._should_continue(
+                total_yielded, max_results, searchresult.total_result, page, batch_size
+            ):
+                break
+
+            page += 1
+
+    async def _fetch_page(self, params: SearchParams) -> ClientResponse:
         """
         获取单页结果
 
         Args:
             params: 搜索参数
-            start: 起始位置
 
         Returns:
             响应对象
@@ -65,38 +120,23 @@ class ArxivClient:
         Raises:
             QueryBuildError: 如果构建查询参数失败
         """
-        try:
-            query_params = self._build_query_params(params, start)
-            response = await self._session_manager.request(
-                "GET", str(self._config.base_url), params=query_params
-            )
+        query_params = self._build_query_params(params)
+        response = await self._session_manager.request(
+            "GET", str(self._config.base_url), params=query_params
+        )
 
-            if response.status != 200:
-                logger.error("搜索请求失败", extra={"status_code": response.status})
-                raise HTTPException(response.status)
+        if response.status != 200:
+            logger.error(f"搜索请求失败, HTTP状态码: {response.status}")
+            raise HTTPException(response.status)
 
-            return response
+        return response
 
-        except QueryBuildError:
-            raise
-        except Exception as e:
-            logger.error("未预期的错误", exc_info=True)
-            raise QueryBuildError(
-                message="构建查询参数失败",
-                context=QueryContext(
-                    params={"query": params.query, "start": start},
-                    field_name="query_params",
-                ),
-                original_error=e,
-            )
-
-    def _build_query_params(self, params: SearchParams, start: int) -> dict:
+    def _build_query_params(self, params: SearchParams) -> dict:
         """
         构建查询参数
 
         Args:
-            params: 搜索参数
-            start: 起始位置
+            params: 搜索参数模型
 
         Returns:
             dict: 查询参数
@@ -105,16 +145,18 @@ class ArxivClient:
             QueryBuildError: 如果构建查询参数失败
         """
         try:
-            page_size = min(
-                self._config.page_size,
-                params.max_results - start if params.max_results else float("inf"),
+            page_size = calculate_page_size(
+                self._config.page_size, params.start, params.max_results
             )
 
             query_params = {
                 "search_query": params.query,
-                "start": start,
+                "start": params.start,
                 "max_results": page_size,
             }
+
+            if params.id_list:
+                query_params["id_list"] = ",".join(params.id_list)
 
             if params.sort_by:
                 query_params["sortBy"] = params.sort_by.value
@@ -126,19 +168,20 @@ class ArxivClient:
 
         except Exception as e:
             raise QueryBuildError(
-                message="计算页面大小失败",
+                message="构建查询参数失败",
                 context=QueryContext(
                     params={
                         "page_size": self._config.page_size,
                         "max_results": params.max_results,
-                        "start": start,
+                        "start": params.start,
+                        "id_list": params.id_list,
                     },
-                    field_name="page_size",
+                    field_name="query_params",
                 ),
                 original_error=e,
-            )
+            ) from e
 
-    async def parse_response(self, response: ClientResponse) -> tuple[list[Paper], int]:
+    async def parse_response(self, response: ClientResponse) -> list[Paper]:
         """
         解析API响应
 
@@ -151,18 +194,8 @@ class ArxivClient:
         Raises:
             ParserException: 如果解析失败
         """
-        content = await response.text()
-        try:
-            return await ArxivParser.parse_feed(content=content, url=str(response.url))
-        except ParserException:
-            raise
-        except Exception as e:
-            raise ParserException(
-                url=str(response.url),
-                message="解析响应失败",
-                context=ParseErrorContext(raw_content=content),
-                original_error=e,
-            )
+        text = await response.text()
+        return ArxivParser(text, response).parse_feed()
 
     async def download_paper(
         self, paper: Paper, filename: Optional[str] = None
