@@ -3,19 +3,46 @@ from types import TracebackType
 from typing import Optional
 
 import aiofiles
+from platformdirs import user_cache_path, user_documents_path
 
-from ..utils import get_project_root
-from ..utils.log import logger
-from ..utils.session import SessionManager
+from aioarxiv.utils import get_project_root
+from aioarxiv.utils.log import logger
+from aioarxiv.utils.session import SessionManager
+
+
+def cache_path() -> Path:
+    """
+    获取缓存目录
+
+    Returns:
+        Path: 缓存目录
+    """
+    return user_cache_path(
+        "aioarxiv",
+        ensure_exists=True,
+    )
+
+
+def documents_path() -> Path:
+    """
+    获取下载目录
+
+    Returns:
+        Path: 下载目录
+    """
+    path = user_documents_path() / "aioarxiv"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
 
 
 class ArxivDownloader:
     """arXiv论文下载器"""
+
     def __init__(
-            self,
-            session_manager: Optional[SessionManager] = None,
-            download_dir: Optional[str] = None
-    ):
+        self,
+        session_manager: Optional[SessionManager] = None,
+        download_dir: Optional[Path] = None,
+    ) -> None:
         """
         初始化下载器
 
@@ -26,7 +53,9 @@ class ArxivDownloader:
         project_root = get_project_root()
         self._session_manager = session_manager
         self._own_session = False
-        self.download_dir = Path(download_dir) if download_dir else project_root / "downloads"
+        self.download_dir = (
+            Path(download_dir) if download_dir else project_root / "downloads"
+        )
         self.download_dir.mkdir(parents=True, exist_ok=True)
 
     @property
@@ -38,9 +67,9 @@ class ArxivDownloader:
         return self._session_manager
 
     async def download_paper(
-            self,
-            pdf_url: str,
-            filename: Optional[str] = None
+        self,
+        pdf_url: str,
+        filename: Optional[str] = None,
     ) -> Path:
         """下载论文PDF文件"""
         if not filename:
@@ -49,7 +78,7 @@ class ArxivDownloader:
                 filename += ".pdf"
 
         file_path = self.download_dir / filename
-        temp_path = file_path.with_suffix(file_path.suffix + ".tmp")
+        temp_path = file_path.with_suffix(f"{file_path.suffix}.tmp")
 
         logger.info(f"开始下载论文: {pdf_url}")
         try:
@@ -70,8 +99,11 @@ class ArxivDownloader:
                                 downloaded_size += len(chunk)
 
                     if 0 < total_size != downloaded_size:
-                        raise RuntimeError(
-                            f"下载不完整: 预期 {total_size} 字节, 实际下载 {downloaded_size} 字节")
+                        msg = (
+                            f"下载不完整: 预期 {total_size} 字节, "
+                            f"实际下载 {downloaded_size} 字节"
+                        )
+                        raise RuntimeError(msg)
 
                 temp_path.rename(file_path)
 
@@ -91,10 +123,10 @@ class ArxivDownloader:
         return self
 
     async def __aexit__(
-            self,
-            exc_type: Optional[type[BaseException]],
-            exc_val: Optional[BaseException],
-            exc_tb: Optional[TracebackType]
+        self,
+        exc_type: Optional[type[BaseException]],
+        exc_val: Optional[BaseException],
+        exc_tb: Optional[TracebackType],
     ) -> None:
         if self._own_session and self._session_manager:
             await self._session_manager.close()
