@@ -1,8 +1,8 @@
+from dataclasses import dataclass
 from http import HTTPStatus
 from typing import Any, Optional
-from dataclasses import dataclass
 
-from pydantic import HttpUrl, BaseModel
+from pydantic import BaseModel, HttpUrl
 
 
 class ArxivException(Exception):
@@ -15,7 +15,7 @@ class ArxivException(Exception):
 class HTTPException(ArxivException):
     """HTTP 请求相关异常"""
 
-    def __init__(self, status_code: int, message: Optional[str] = None):
+    def __init__(self, status_code: int, message: Optional[str] = None) -> None:
         self.status_code = status_code
         self.message = message or HTTPStatus(status_code).description
         super().__init__(self.message)
@@ -24,7 +24,7 @@ class HTTPException(ArxivException):
 class RateLimitException(HTTPException):
     """达到 API 速率限制时的异常"""
 
-    def __init__(self, retry_after: Optional[int] = None):
+    def __init__(self, retry_after: Optional[int] = None) -> None:
         self.retry_after = retry_after
         super().__init__(429, "Too Many Requests")
 
@@ -40,7 +40,7 @@ class ValidationException(ArxivException):
         expected_type: type,
         model: Optional[type[BaseModel]] = None,
         validation_errors: Optional[dict] = None,
-    ):
+    ) -> None:
         self.field_name = field_name
         self.input_value = input_value
         self.expected_type = expected_type
@@ -75,7 +75,7 @@ class TimeoutException(ArxivException):
         message: Optional[str] = None,
         proxy: Optional[HttpUrl] = None,
         link: Optional[HttpUrl] = None,
-    ):
+    ) -> None:
         self.timeout = timeout
         self.proxy = proxy
         self.link = link
@@ -100,7 +100,7 @@ class TimeoutException(ArxivException):
 class RetryError(ArxivException):
     """重试次数用尽异常"""
 
-    def __init__(self, attempts: int, last_error: Exception):
+    def __init__(self, attempts: int, last_error: Exception) -> None:
         self.attempts = attempts
         self.last_error = last_error
         super().__init__(f"Failed after {attempts} attempts. Last error: {last_error}")
@@ -126,7 +126,7 @@ class ConfigurationError(ArxivException):
         input_value: Any,
         expected_type: type,
         config_class: Optional[type] = None,
-    ):
+    ) -> None:
         self.property_name = property_name
         self.input_value = input_value
         self.expected_type = expected_type
@@ -166,7 +166,7 @@ class QueryBuildError(ArxivException):
         message: str,
         context: Optional[QueryContext] = None,
         original_error: Optional[Exception] = None,
-    ):
+    ) -> None:
         self.message = message
         self.context = context
         self.original_error = original_error
@@ -196,7 +196,7 @@ class QueryBuildError(ArxivException):
                 [
                     f"原始错误: {self.original_error!s}",
                     f"原始错误类型: {type(self.original_error).__name__}",
-                ]
+                ],
             )
 
         return "\n".join(error_parts)
@@ -221,7 +221,7 @@ class ParserException(Exception):
         message: str,
         context: Optional[ParseErrorContext] = None,
         original_error: Optional[Exception] = None,
-    ):
+    ) -> None:
         self.url = url
         self.message = message
         self.context = context
@@ -250,6 +250,17 @@ class ParserException(Exception):
 class SearchCompleteException(ArxivException):
     """搜索完成异常"""
 
-    def __init__(self, total_results: int):
+    def __init__(self, total_results: int) -> None:
         self.total_results = total_results
         super().__init__(f"搜索完成,共获取{total_results}条结果")
+
+
+class PaperDownloadException(ArxivException):
+    """论文下载异常"""
+
+    def __init__(self, message: str) -> None:
+        self.message = message
+        super().__init__(message)
+
+    def __str__(self) -> str:
+        return f"论文下载异常: {self.message}"
