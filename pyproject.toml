@@ -46,6 +46,8 @@ select = [
     "Q",     # flake8-quotes
     "TID",   # flake8-tidy-imports
     "RUF",   # Ruff-specific rules
+    "DTZ",   # flake8-datetimez
+    "SIM",   # flake8-simplify
 ]
 ignore = [
     "E402",   # module-import-not-at-top-of-file
