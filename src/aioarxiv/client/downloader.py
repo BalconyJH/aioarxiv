@@ -1,38 +1,56 @@
+import asyncio
+from datetime import datetime
 from pathlib import Path
-from types import TracebackType
-from typing import Optional
+from typing import Optional, Protocol
+from zoneinfo import ZoneInfo
 
 import aiofiles
-from platformdirs import user_cache_path, user_documents_path
+from platformdirs import user_documents_path
+from tenacity import retry, stop_after_attempt, wait_exponential
 
-from aioarxiv.utils import get_project_root
+from aioarxiv.config import ArxivConfig, default_config
+from aioarxiv.exception import PaperDownloadException
+from aioarxiv.models import Paper, SearchResult
+from aioarxiv.utils import format_datetime, sanitize_title
 from aioarxiv.utils.log import logger
 from aioarxiv.utils.session import SessionManager
 
 
-def cache_path() -> Path:
-    """
-    获取缓存目录
+class DownloadProtocol(Protocol):
+    """下载器协议"""
 
-    Returns:
-        Path: 缓存目录
-    """
-    return user_cache_path(
-        "aioarxiv",
-        ensure_exists=True,
-    )
+    async def request(self, method: str, url: str, **kwargs) -> None: ...
 
 
-def documents_path() -> Path:
-    """
-    获取下载目录
+class DownloadTracker:
+    """批量下载上下文"""
 
-    Returns:
-        Path: 下载目录
-    """
-    path = user_documents_path() / "aioarxiv"
-    path.mkdir(parents=True, exist_ok=True)
-    return path
+    def __init__(self, total: int, start_time: Optional[datetime] = None) -> None:
+        self.total = total
+        self.completed = 0
+        self.failed = 0
+        self.start_time = start_time or datetime.now(ZoneInfo(default_config.timezone))
+        self.end_time: Optional[datetime] = None
+        self._failed_papers: list[tuple[Paper, Exception]] = []
+
+    def add_failed(self, paper: Paper, error: Exception) -> None:
+        """记录下载失败的论文"""
+        self.failed += 1
+        self._failed_papers.append((paper, error))
+
+    def add_completed(self) -> None:
+        """记录完成下载"""
+        self.completed += 1
+
+    @property
+    def progress(self) -> float:
+        """下载进度"""
+        return (self.completed + self.failed) / self.total * 100
+
+    @property
+    def failed_papers(self) -> list[tuple[Paper, Exception]]:
+        """获取下载失败的论文列表"""
+        return self._failed_papers
 
 
 class ArxivDownloader:
@@ -42,91 +60,126 @@ class ArxivDownloader:
         self,
         session_manager: Optional[SessionManager] = None,
         download_dir: Optional[Path] = None,
+        # cache_dir: Optional[Path] = None,
+        config: Optional[ArxivConfig] = None,
     ) -> None:
-        """
-        初始化下载器
-
-        Args:
-            session_manager: 会话管理器,可选
-            download_dir: 下载目录,可选
-        """
-        project_root = get_project_root()
         self._session_manager = session_manager
-        self._own_session = False
-        self.download_dir = (
-            Path(download_dir) if download_dir else project_root / "downloads"
-        )
-        self.download_dir.mkdir(parents=True, exist_ok=True)
+        self._download_dir = download_dir
+        # self._cache_dir = cache_dir
+        self._config = config or default_config
+        self._semaphore = asyncio.Semaphore(self._config.max_concurrent_requests)
 
     @property
     def session_manager(self) -> SessionManager:
         """懒加载会话管理器"""
         if self._session_manager is None:
             self._session_manager = SessionManager()
-            self._own_session = True
         return self._session_manager
 
+    @property
+    def download_dir(self) -> Path:
+        """下载目录"""
+        if self._download_dir is None:
+            self._download_dir = user_documents_path() / "aioarxiv"
+        self._download_dir.mkdir(parents=True, exist_ok=True)
+        return self._download_dir
+
+    # @property
+    # def cache_dir(self) -> Path:
+    #     """缓存目录"""
+    #     if self._cache_dir is None:
+    #         self._cache_dir = user_cache_path("aioarxiv")
+    #     self._cache_dir.mkdir(parents=True, exist_ok=True)
+    #     return self._cache_dir
+
+    @staticmethod
+    def file_name(paper: Paper) -> str:
+        """生成文件名"""
+        file_name = f"{paper.info.title} {format_datetime(paper.info.updated)}"
+        return f"{sanitize_title(file_name)}.pdf"
+
+    def _prepare_paths(
+        self, paper: Paper, filename: Optional[str] = None
+    ) -> tuple[Path, Path]:
+        """准备下载和临时文件路径"""
+        name = filename or self.file_name(paper)
+        file_path = self.download_dir / name
+        temp_path = file_path.with_suffix(".tmp")
+        return file_path, temp_path
+
+    async def _download_to_temp(self, url: str, temp_path: Path) -> None:
+        """下载内容到临时文件"""
+        async with self._semaphore:
+            response = await self.session_manager.request("GET", url)
+            if response.status != 200:
+                raise PaperDownloadException(f"HTTP status {response.status}")
+
+            async with aiofiles.open(temp_path, "wb") as f:
+                async for chunk in response.content.iter_chunked(8192):
+                    await f.write(chunk)
+
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=4, max=10),
+        retry_error_callback=lambda retry_state: logger.warning(
+            f"重试次数: {retry_state.attempt_number}/3"
+        ),
+    )
     async def download_paper(
-        self,
-        pdf_url: str,
-        filename: Optional[str] = None,
-    ) -> Path:
-        """下载论文PDF文件"""
-        if not filename:
-            filename = pdf_url.split("/")[-1]
-            if not filename.endswith(".pdf"):
-                filename += ".pdf"
-
-        file_path = self.download_dir / filename
-        temp_path = file_path.with_suffix(f"{file_path.suffix}.tmp")
-
-        logger.info(f"开始下载论文: {pdf_url}")
-        try:
-            async with self.session_manager.rate_limited_context():
-                # 先获取响应
-                response = await self.session_manager.request("GET", pdf_url)
-                # 然后使用 async with 管理响应生命周期
-                async with response:
-                    response.raise_for_status()
-
-                    async with aiofiles.open(temp_path, "wb") as f:
-                        total_size = int(response.headers.get("content-length", 0))
-                        downloaded_size = 0
-
-                        async for chunk, _ in response.content.iter_chunks():
-                            if chunk:
-                                await f.write(chunk)
-                                downloaded_size += len(chunk)
-
-                    if 0 < total_size != downloaded_size:
-                        msg = (
-                            f"下载不完整: 预期 {total_size} 字节, "
-                            f"实际下载 {downloaded_size} 字节"
-                        )
-                        raise RuntimeError(msg)
-
-                temp_path.rename(file_path)
-
-            logger.info(f"下载完成: {file_path}")
-            return file_path
-
-        except Exception as e:
-            logger.error(f"下载失败: {e!s}")
-            # 清理临时文件和目标文件
-            if temp_path.exists():
-                temp_path.unlink()
-            if file_path.exists():
-                file_path.unlink()
-            raise
-
-    async def __aenter__(self) -> "ArxivDownloader":
-        return self
-
-    async def __aexit__(
-        self,
-        exc_type: Optional[type[BaseException]],
-        exc_val: Optional[BaseException],
-        exc_tb: Optional[TracebackType],
+        self, paper: Paper, filename: Optional[str] = None
     ) -> None:
-        if self._own_session and self._session_manager:
-            await self._session_manager.close()
+        """下载单篇论文"""
+        file_path, temp_path = self._prepare_paths(paper, filename)
+        logger.info(f"开始下载论文: {paper.pdf_url}")
+
+        try:
+            await self._download_to_temp(str(paper.pdf_url), temp_path)
+            temp_path.rename(file_path)
+            logger.info(f"下载完成: {file_path}")
+        except Exception as e:
+            logger.error(f"下载失败: {e}")
+            temp_path.unlink(missing_ok=True)
+            file_path.unlink(missing_ok=True)
+            raise PaperDownloadException(f"下载失败: {e}") from e
+
+    async def batch_download(
+        self,
+        search_result: SearchResult,
+    ) -> DownloadTracker:
+        """
+        批量下载论文
+
+        Args:
+            search_result: 搜索结果
+
+        Returns:
+            DownloadTracker: 下载上下文
+        """
+        context = DownloadTracker(len(search_result.papers))
+        tasks = []
+
+        for paper in search_result.papers:
+            if not paper.pdf_url:
+                context.add_failed(paper, ValueError("No PDF URL available"))
+                continue
+
+            task = asyncio.create_task(self._download_with_context(paper, context))
+            tasks.append(task)
+
+        await asyncio.gather(*tasks)
+        context.end_time = datetime.now(ZoneInfo(default_config.timezone))
+        return context
+
+    async def _download_with_context(
+        self, paper: Paper, context: DownloadTracker
+    ) -> None:
+        """下载单篇论文并更新上下文"""
+        try:
+            await self.download_paper(paper, f"{paper.info.id}.pdf")
+            context.add_completed()
+        except Exception as e:
+            context.add_failed(paper, e)
+            logger.error(
+                f"论文 {paper.info.id} 下载失败: {e!s}",
+                extra={"paper_id": paper.info.id},
+            )

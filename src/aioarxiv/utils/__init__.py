@@ -1,13 +1,18 @@
+from datetime import datetime
 from pathlib import Path
+import re
 from time import monotonic
+from types import SimpleNamespace
 from typing import Optional
 import xml.etree.ElementTree as ET
-from types import SimpleNamespace
+from zoneinfo import ZoneInfo
 
 import aiohttp
 
+from aioarxiv.config import default_config
+from aioarxiv.exception import ParseErrorContext, ParserException
+
 from .log import logger
-from ..exception import ParserException, ParseErrorContext
 
 
 def create_trace_config() -> aiohttp.TraceConfig:
@@ -34,7 +39,7 @@ def create_trace_config() -> aiohttp.TraceConfig:
         elapsed_time = monotonic() - trace_config_ctx.start_time
         logger.debug(
             f"Ending request: {params.response.status} {params.url} - Time elapsed: "
-            f"{elapsed_time:.2f} seconds"
+            f"{elapsed_time:.2f} seconds",
         )
 
     trace_config = aiohttp.TraceConfig()
@@ -81,7 +86,9 @@ def get_project_root() -> Path:
 
 
 def calculate_page_size(
-    config_page_size: int, start: int, max_results: Optional[int]
+    config_page_size: int,
+    start: int,
+    max_results: Optional[int],
 ) -> int:
     """
     计算单页大小, 限制在配置的单页大小和最大结果数之间。
@@ -98,3 +105,34 @@ def calculate_page_size(
         return config_page_size
 
     return min(config_page_size, max_results - start)
+
+
+def format_datetime(dt: datetime) -> str:
+    """
+    格式化日期时间。
+
+    Args:
+        dt (datetime): 日期时间
+
+    Returns:
+        str: 格式化后的日期时间, 格式为: %Y-%m-%d_%H-%M-%S_%Z (2024-03-21_15-30-00_CST)
+    """
+    local_dt = dt.astimezone(ZoneInfo(default_config.timezone))
+    return local_dt.strftime("%Y-%m-%d_%H-%M-%S_%Z")
+
+
+def sanitize_title(title: str, max_length: int = 50) -> str:
+    """
+    清理字符串，确保可安全用作文件名，并限制长度。
+
+    Args:
+        title (str): 原始文件名
+        max_length (int): 文件名的最大长度
+
+    Returns:
+        str: 清理后的文件名, 如果超过最大长度, 则截断并添加省略号
+    """
+    sanitized = re.sub(r'[\\/*?:"<>|]', "-", title).strip()
+    if len(sanitized) > max_length:
+        sanitized = sanitized[: max_length - 3].rstrip("-") + "..."
+    return sanitized
