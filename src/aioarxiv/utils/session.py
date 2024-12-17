@@ -1,12 +1,16 @@
-from typing import Optional
-from types import TracebackType
+from typing import TYPE_CHECKING, Optional
+from typing_extensions import Self
 
-from aiohttp import TraceConfig, ClientSession, ClientTimeout, ClientResponse
+from aiohttp import ClientResponse, ClientSession, ClientTimeout, TraceConfig
+
+from aioarxiv.config import ArxivConfig, default_config
+from aioarxiv.utils import create_trace_config
 
 from .log import logger
 from .rate_limiter import RateLimiter
-from ..utils import create_trace_config
-from ..config import ArxivConfig, default_config
+
+if TYPE_CHECKING:
+    from types import TracebackType
 
 
 class SessionManager:
@@ -31,7 +35,8 @@ class SessionManager:
         self._session = session
         self._trace_config = trace_config or create_trace_config()
 
-    async def get_session(self) -> ClientSession:
+    @property
+    async def session(self) -> ClientSession:
         """
         获取或创建会话
 
@@ -58,13 +63,12 @@ class SessionManager:
         Returns:
             ClientResponse: aiohttp响应对象
         """
-        session = await self.get_session()
-
         if self._config.proxy:
             logger.trace(f"使用代理: {self._config.proxy}")
             kwargs["proxy"] = self._config.proxy
 
-        return await session.request(method, url, **kwargs)
+        async with await self.session as client:
+            return await client.request(method, url, **kwargs)
 
     async def close(self) -> None:
         """关闭会话"""
@@ -72,7 +76,7 @@ class SessionManager:
             await self._session.close()
             self._session = None
 
-    async def __aenter__(self) -> "SessionManager":
+    async def __aenter__(self) -> Self:
         """
         进入会话管理器
 
