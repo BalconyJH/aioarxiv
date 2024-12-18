@@ -13,6 +13,7 @@ dependencies = [
     "tenacity>=9.0.0",
     "aiofiles>=24.1.0",
     "platformdirs>=4.3.6",
+    "tzdata>=2024.2",
 ]
 requires-python = ">=3.9"
 readme = "README.md"
@@ -48,6 +49,7 @@ select = [
     "RUF",   # Ruff-specific rules
     "DTZ",   # flake8-datetimez
     "SIM",   # flake8-simplify
+    "ISC",   # flake8-implicit-str-concat
 ]
 ignore = [
     "E402",   # module-import-not-at-top-of-file
