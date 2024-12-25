@@ -1,5 +1,4 @@
 from datetime import datetime
-from pathlib import Path
 import re
 from time import monotonic
 from types import SimpleNamespace
@@ -8,6 +7,7 @@ import xml.etree.ElementTree as ET
 from zoneinfo import ZoneInfo
 
 import aiohttp
+from tenacity import RetryCallState
 
 from aioarxiv.config import default_config
 from aioarxiv.exception import ParseErrorContext, ParserException
@@ -80,11 +80,6 @@ def create_parser_exception(
     )
 
 
-def get_project_root() -> Path:
-    """获取项目根目录"""
-    return Path(__file__).parent.parent.parent
-
-
 def calculate_page_size(
     config_page_size: int,
     start: int,
@@ -136,3 +131,9 @@ def sanitize_title(title: str, max_length: int = 50) -> str:
     if len(sanitized) > max_length:
         sanitized = sanitized[: max_length - 3].rstrip("-") + "..."
     return sanitized
+
+
+def log_retry_attempt(retry_state: RetryCallState) -> None:
+    logger.warning(
+        f"重试次数: {retry_state.attempt_number}/{default_config.max_retries}"
+    )
