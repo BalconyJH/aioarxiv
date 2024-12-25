@@ -57,6 +57,7 @@ ignore = [
     "RUF001", # ambiguous-unicode-character-string
     "RUF002", # ambiguous-unicode-character-docstring
     "RUF003", # ambiguous-unicode-character-comment
+    "ISC001"  # single-line-implicit-string-concatenation
 ]
 
 [tool.ruff.lint.isort]
