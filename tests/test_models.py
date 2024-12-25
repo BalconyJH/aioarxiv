@@ -1,8 +1,11 @@
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
-import pytest
 from pydantic import HttpUrl, ValidationError
-from aioarxiv.models import Paper, Metadata, SearchParams, SearchResult
+import pytest
+from yarl import URL
+
+from aioarxiv.models import Metadata, Paper, SearchParams, SearchResult
 
 
 @pytest.fixture
@@ -13,18 +16,23 @@ def paper_base_info():
         "summary": "Test",
         "authors": [{"name": "Test"}],
         "categories": {"primary": {"term": "cs.AI"}, "secondary": []},
-        "published": datetime.now(),
-        "updated": datetime.now(),
+        "published": datetime.now(tz=ZoneInfo("Asia/Shanghai")),
+        "updated": datetime.now(tz=ZoneInfo("Asia/Shanghai")),
     }
 
 
 @pytest.mark.parametrize(
-    "doi", ["10.1234/test.123", "10.12345/test-123", "10.1234/test_123"]
+    "doi",
+    ["10.1234/test.123", "10.12345/test-123", "10.1234/test_123"],
 )
-def test_valid_doi(paper_base_info, doi):
+def test_valid_doi(paper_base_info, doi) -> None:
     """测试有效的DOI格式"""
     paper = Paper(
-        info=paper_base_info, doi=doi, journal_ref=None, pdf_url=None, comment=None
+        info=paper_base_info,
+        doi=doi,
+        journal_ref=None,
+        pdf_url=None,
+        comment=None,
     )
     assert paper.doi == doi
 
@@ -37,7 +45,7 @@ def test_valid_doi(paper_base_info, doi):
         "test.123",  # Invalid format
     ],
 )
-def test_invalid_doi(paper_base_info, invalid_doi):
+def test_invalid_doi(paper_base_info, invalid_doi) -> None:
     """Test paper model with invalid DOI"""
     with pytest.raises(ValidationError):
         Paper(
@@ -52,26 +60,48 @@ def test_invalid_doi(paper_base_info, invalid_doi):
 @pytest.mark.parametrize(
     ("start", "end", "expected_seconds", "expected_ms"),
     [
-        (datetime(2024, 1, 1, 12, 0, 0), datetime(2024, 1, 1, 12, 0, 1), 1.0, 1000.0),
+        # Existing cases
         (
-            datetime(2024, 1, 1, 12, 0, 0),
-            datetime(2024, 1, 1, 12, 0, 0, 500000),
+            datetime(2024, 1, 1, 12, 0, 0, tzinfo=ZoneInfo("Asia/Shanghai")),
+            datetime(2024, 1, 1, 12, 0, 1, tzinfo=ZoneInfo("Asia/Shanghai")),
+            1.0,
+            1000.0,
+        ),
+        (
+            datetime(2024, 1, 1, 12, 0, 0, tzinfo=ZoneInfo("Asia/Shanghai")),
+            datetime(2024, 1, 1, 12, 0, 0, 500000, tzinfo=ZoneInfo("Asia/Shanghai")),
             0.5,
             500.0,
         ),
+        (
+            datetime(2024, 1, 1, 12, 0, 0, tzinfo=ZoneInfo("Asia/Shanghai")),
+            None,
+            0.0,
+            0.0,
+        ),
+        (
+            datetime(2024, 1, 1, 12, 0, 0, tzinfo=ZoneInfo("Asia/Shanghai")),
+            datetime(2024, 1, 1, 12, 0, 0, 1000, tzinfo=ZoneInfo("Asia/Shanghai")),
+            0.001,
+            1.0,
+        ),
     ],
 )
-def test_metadata_duration(start, end, expected_seconds, expected_ms):
+def test_metadata_duration(start, end, expected_seconds, expected_ms) -> None:
     """测试元数据持续时间计算"""
     metadata = Metadata(
-        start_time=start, end_time=end, missing_results=0, pagesize=20, source="test"
+        start_time=start,
+        end_time=end,
+        missing_results=0,
+        pagesize=20,
+        source=URL("http://test.com"),
     )
     assert metadata.duration_seconds == expected_seconds
     assert metadata.duration_ms == expected_ms
 
 
 @pytest.mark.parametrize("papers_count", [0, 1, 5])
-def test_search_result_papers_count(papers_count, paper_base_info):
+def test_search_result_papers_count(papers_count, paper_base_info) -> None:
     """测试搜索结果论文数量计算"""
     papers = [
         Paper(
@@ -96,7 +126,9 @@ def test_search_result_papers_count(papers_count, paper_base_info):
             sort_by=None,
             sort_order=None,
         ),
-        metadata=Metadata(missing_results=0, pagesize=20, source="test"),
+        metadata=Metadata(
+            missing_results=0, pagesize=20, source=URL("http://test.com"), end_time=None
+        ),
     )
     assert result.papers_count == papers_count
 
@@ -108,7 +140,9 @@ def test_search_result_papers_count(papers_count, paper_base_info):
         ("10.12345/test-123", None, None, None),
     ],
 )
-def test_paper_optional_fields(paper_base_info, doi, journal_ref, pdf_url, comment):
+def test_paper_optional_fields(
+    paper_base_info, doi, journal_ref, pdf_url, comment
+) -> None:
     """Test paper model with optional fields"""
     paper = Paper(
         info=paper_base_info,

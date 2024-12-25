@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom" xmlns:opensearch="http://a9.com/-/spec/opensearch/1.1/" xmlns:arxiv="http://arxiv.org/schemas/atom">
+    <opensearch:totalResults>1</opensearch:totalResults>
+    <entry>
+        <id>http://arxiv.org/abs/1234.5678</id>
+        <title>Test Paper</title>
+        <summary>Test Summary</summary>
+        <author>
+            <name>Test Author</name>
+            <arxiv:affiliation>Test University</arxiv:affiliation>
+        </author>
+        <arxiv:primary_category term="cs.AI" scheme="http://arxiv.org/schemas/atom" label="Artificial Intelligence"/>
+        <category term="cs.AI"/>
+        <published>2024-03-18T00:00:00Z</published>
+        <updated>2024-03-18T12:00:00Z</updated>
+        <link href="http://arxiv.org/pdf/1234.5678.pdf" type="application/pdf"/>
+        <arxiv:doi>10.1234/test.123</arxiv:doi>
+        <arxiv:comment>Test Comment</arxiv:comment>
+        <arxiv:journal_ref>Test Journal</arxiv:journal_ref>
+    </entry>
+</feed>
