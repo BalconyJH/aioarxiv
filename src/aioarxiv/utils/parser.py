@@ -1,23 +1,27 @@
 from datetime import datetime
-import xml.etree.ElementTree as ET
 from typing import ClassVar, Optional, cast
+import xml.etree.ElementTree as ET
+from zoneinfo import ZoneInfo
 
 from aiohttp import ClientResponse
 from pydantic import AnyUrl, HttpUrl
+from yarl import URL
 
-from .log import logger
-from . import create_parser_exception
-from ..exception import ParserException
-from ..models import (
-    Paper,
+from aioarxiv.config import default_config
+from aioarxiv.exception import ParserException
+from aioarxiv.models import (
     Author,
+    BasicInfo,
     Category,
     Metadata,
-    BasicInfo,
+    Paper,
+    PrimaryCategory,
     SearchParams,
     SearchResult,
-    PrimaryCategory,
 )
+
+from . import create_parser_exception
+from .log import logger
 
 
 class ArxivParser:
@@ -40,7 +44,7 @@ class ArxivParser:
         "arxiv": "http://arxiv.org/schemas/atom",
     }
 
-    def __init__(self, response_context: str, raw_response: ClientResponse):
+    def __init__(self, response_context: str, raw_response: ClientResponse) -> None:
         self.response_context = response_context
         self.raw_response = raw_response
         self.entry = ET.fromstring(response_context)  # Root element of the XML tree
@@ -101,8 +105,9 @@ class ArxivParser:
 
 
 class RootParser:
-    def __init__(self, response_context: str):
+    def __init__(self, response_context: str, response_url: URL) -> None:
         self.response_context = response_context
+        self.response_url = response_url
         self.entry = ET.fromstring(response_context)
 
     def parse_total_result(self) -> int:
@@ -135,7 +140,8 @@ class RootParser:
             metadata=Metadata(
                 missing_results=0,
                 pagesize=0,
-                source="arxiv",
+                source=self.response_url,
+                end_time=None,
             ),
         )
 
@@ -143,7 +149,7 @@ class RootParser:
 class PaperParser:
     """Paper解析器"""
 
-    def __init__(self, entry: ET.Element):
+    def __init__(self, entry: ET.Element) -> None:
         self.entry = entry
 
     def parse_authors(self) -> list[Author]:
@@ -155,7 +161,7 @@ class PaperParser:
         """
 
         def get_text(element: ET.Element, tag: str, namespace: dict) -> Optional[str]:
-            """辅助函数，用于获取子元素的文本内容"""
+            """辅助函数,  用于获取子元素的文本内容"""
             sub_elem = element.find(tag, namespace)
             return sub_elem.text if sub_elem is not None else None
 
@@ -186,45 +192,27 @@ class PaperParser:
         """
 
         def parse_primary() -> PrimaryCategory:
-            """
-            解析主分类信息
-
-            Returns:
-                PrimaryCategory: 主分类信息
-            """
             primary_elem = self.entry.find("arxiv:primary_category", ArxivParser.NS)
-
-            if primary_elem is None or "term" not in primary_elem.attrib:
-                logger.warning("未找到主分类信息，使用默认分类")
-                return PrimaryCategory(term="unknown", scheme=None, label=None)
-
+            if primary_elem is None:
+                raise create_parser_exception(self.entry, "", message="缺少主分类信息")
             return PrimaryCategory(
-                term=primary_elem.attrib["term"],
+                term=primary_elem.get("term", ""),
                 scheme=cast(AnyUrl, primary_elem.attrib.get("scheme")),
-                label=primary_elem.attrib.get("label"),
+                label=primary_elem.get("label"),
             )
 
-        def parse_secondary() -> list[str]:
-            """
-            解析次级分类信息
+        def parse_secondary(primary_term: str) -> list[str]:
+            categories = []
+            for cat in self.entry.findall("category", ArxivParser.NS):
+                term = cat.get("term")
+                if term and term != primary_term:
+                    categories.append(term)
+            return categories
 
-            Returns:
-                list[str]: 次级分类列表
-            """
-            categories = self.entry.findall("atom:category", ArxivParser.NS)
-            primary_elem = self.entry.find("arxiv:primary_category", ArxivParser.NS)
+        primary = parse_primary()
+        secondary = parse_secondary(primary.term)
 
-            return [
-                c.attrib["term"]
-                for c in categories
-                if "term" in c.attrib and c != primary_elem
-            ]
-
-        logger.trace(
-            f"主分类信息: {parse_primary().model_dump()}, "
-            f"次级分类信息: {parse_secondary()}"
-        )
-        return Category(primary=parse_primary(), secondary=parse_secondary())
+        return Category(primary=primary, secondary=secondary)
 
     def parse_basics_info(self) -> BasicInfo:
         """
@@ -321,6 +309,8 @@ class PaperParser:
         """
         try:
             normalized_date = date_str.replace("Z", "+00:00")
-            return datetime.fromisoformat(normalized_date)
+            dt = datetime.fromisoformat(normalized_date)
+            return dt.replace(tzinfo=ZoneInfo(default_config.timezone))
         except ValueError as e:
-            raise ValueError(f"日期格式: {date_str} 不符合预期") from e
+            msg = f"日期格式: {date_str} 不符合预期"
+            raise ValueError(msg) from e
