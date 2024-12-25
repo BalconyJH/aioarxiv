@@ -1,9 +1,22 @@
-import re
-from enum import Enum
-from typing import Optional
 from datetime import datetime
+from enum import Enum
+import re
+from typing import Annotated, Optional
+import uuid
+from zoneinfo import ZoneInfo
 
-from pydantic import Field, AnyUrl, HttpUrl, BaseModel, computed_field, field_validator
+from pydantic import (
+    UUID4,
+    AnyUrl,
+    BaseModel,
+    Field,
+    HttpUrl,
+    computed_field,
+    field_validator,
+)
+from yarl import URL
+
+from aioarxiv.config import default_config
 
 
 class SortCriterion(str, Enum):
@@ -31,7 +44,7 @@ class Author(BaseModel):
 class PrimaryCategory(BaseModel):
     """主分类模型"""
 
-    term: str = Field(description="分类标识符（必须）")
+    term: str = Field(description="分类标识符")
     scheme: Optional[AnyUrl] = Field(None, description="分类系统的 URI")
     label: Optional[str] = Field(None, description="分类标签")
 
@@ -59,7 +72,7 @@ class Paper(BaseModel):
     """论文模型"""
 
     info: BasicInfo = Field(description="基础信息")
-    doi: Optional[str] = Field(None, description="DOI，格式需符合正则")
+    doi: Optional[str] = Field(None, description="DOI,  格式需符合正则")
     journal_ref: Optional[str] = Field(None, description="期刊引用")
     pdf_url: Optional[HttpUrl] = Field(None, description="PDF下载链接")
     comment: Optional[str] = Field(None, description="作者评论或注释")
@@ -72,7 +85,8 @@ class Paper(BaseModel):
 
         pattern = r"^10\.\d{4,9}/[-._;()/:a-zA-Z0-9]+$"
         if not re.match(pattern, v):
-            raise ValueError("Invalid DOI format. Must match pattern: 10.XXXX/suffix")
+            msg = "Invalid DOI format. Must match pattern: 10.XXXX/suffix"
+            raise ValueError(msg)
         return v
 
 
@@ -91,21 +105,31 @@ class Metadata(BaseModel):
     """元数据模型"""
 
     start_time: datetime = Field(
-        default_factory=datetime.now, description="请求创建时间"
+        default_factory=lambda: datetime.now(tz=ZoneInfo(default_config.timezone)),
+        description="请求创建时间",
     )
-    end_time: datetime = Field(default_factory=datetime.now, description="请求结束时间")
+    end_time: Optional[datetime] = Field(
+        None,
+        description="请求结束时间",
+    )
     missing_results: int = Field(description="缺失结果数")
     pagesize: int = Field(description="每页结果数")
-    source: str = Field(description="数据源")
+    source: URL = Field(description="数据源")
+
+    model_config = {"arbitrary_types_allowed": True}
 
     @computed_field
     def duration_seconds(self) -> float:
-        """持续时间(秒)，保留3位小数"""
+        """持续时间(秒),  保留3位小数"""
+        if self.end_time is None:
+            return 0.000
         return round((self.end_time - self.start_time).total_seconds(), 3)
 
     @computed_field
     def duration_ms(self) -> float:
-        """持续时间(毫秒)，保留3位小数"""
+        """持续时间(毫秒),  保留3位小数"""
+        if self.end_time is None:
+            return 0.000
         delta = self.end_time - self.start_time
         return round(delta.total_seconds() * 1000, 3)
 
@@ -113,6 +137,10 @@ class Metadata(BaseModel):
 class SearchResult(BaseModel):
     """搜索结果模型"""
 
+    id: UUID4 = Field(
+        default_factory=lambda: uuid.uuid4(),
+        description="结果ID",
+    )
     papers: list[Paper] = Field(description="论文结果列表")
     total_result: int = Field(description="匹配的总论文数量")
     page: int = Field(description="当前页码")
@@ -125,11 +153,23 @@ class SearchResult(BaseModel):
         return len(self.papers)
 
 
-class NamespaceModel(BaseModel):
-    """命名空间模型"""
+class DownloadStats(BaseModel):
+    """下载统计数据"""
 
-    atom: str = Field("http://www.w3.org/2005/Atom", description="Atom 命名空间")
-    opensearch: str = Field(
-        "http://a9.com/-/spec/opensearch/1.1/", description="OpenSearch 命名空间"
+    total: int = Field(description="总下载数")
+    completed: int = Field(default=0, description="完成数")
+    failed: int = Field(default=0, description="失败数")
+    start_time: datetime = Field(
+        default_factory=lambda: datetime.now(tz=ZoneInfo(default_config.timezone)),
+        description="开始时间",
     )
-    arxiv: str = Field("http://arxiv.org/schemas/atom", description="arXiv 命名空间")
+    end_time: Optional[datetime] = Field(default=None, description="结束时间")
+    papers: Annotated[
+        list[Paper], Field(default_factory=list, description="已下载论文")
+    ]
+    failed_papers: Annotated[
+        list[tuple[Paper, Exception]],
+        Field(default_factory=list, description="下载失败的论文"),
+    ]
+
+    model_config = {"arbitrary_types_allowed": True}
