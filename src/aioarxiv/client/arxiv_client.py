@@ -1,18 +1,20 @@
-from pathlib import Path
-from typing import Optional
-from datetime import datetime
-from types import TracebackType
 from collections.abc import AsyncGenerator
+from datetime import datetime
+from pathlib import Path
+from types import TracebackType
+from typing import Optional
+from zoneinfo import ZoneInfo
 
 from aiohttp import ClientResponse
 
-from .downloader import ArxivDownloader
-from ..utils.session import SessionManager
-from ..utils import logger, calculate_page_size
-from ..config import ArxivConfig, default_config
-from ..utils.parser import RootParser, ArxivParser
-from ..exception import QueryContext, HTTPException, QueryBuildError
-from ..models import Paper, SortOrder, SearchParams, SearchResult, SortCriterion
+from aioarxiv.config import ArxivConfig, default_config
+from aioarxiv.exception import HTTPException, QueryBuildError, QueryContext
+from aioarxiv.models import Paper, SearchParams, SearchResult, SortCriterion, SortOrder
+from aioarxiv.utils import calculate_page_size, logger
+from aioarxiv.utils.parser import ArxivParser, RootParser
+from aioarxiv.utils.session import SessionManager
+
+from .downloader import ArxivDownloader, DownloadTracker
 
 
 class ArxivClient:
@@ -20,10 +22,31 @@ class ArxivClient:
         self,
         config: Optional[ArxivConfig] = None,
         session_manager: Optional[SessionManager] = None,
-    ):
+        enable_downloader: bool = False,
+        download_dir: Optional[Path] = None,
+    ) -> None:
         self._config = config or default_config
         self._session_manager = session_manager or SessionManager(config=self._config)
-        self._downloader = ArxivDownloader(self._session_manager)
+        self.download_dir = download_dir
+        self._enable_downloader = enable_downloader
+        self._downloader: Optional[ArxivDownloader] = None
+        logger.debug(
+            f"ArxivClient initialized with config: {self._config.model_dump()}"
+        )
+
+    @property
+    def downloader(self) -> Optional[ArxivDownloader]:
+        """懒加载下载器"""
+        if not self._enable_downloader:
+            logger.debug("下载器未启用")
+            return None
+        if self._downloader is None:
+            self._downloader = ArxivDownloader(
+                self._session_manager,
+                self.download_dir,
+                self._config,
+            )
+        return self._downloader
 
     def _build_search_metadata(
         self,
@@ -41,12 +64,12 @@ class ArxivClient:
                 "has_next": has_next,
                 "metadata": searchresult.metadata.model_copy(
                     update={
-                        "end_time": datetime.now(),
+                        "end_time": datetime.now(tz=ZoneInfo(default_config.timezone)),
                         "pagesize": self._config.page_size,
                         "source": "arxiv",
-                    }
+                    },
                 ),
-            }
+            },
         )
 
     @staticmethod
@@ -84,12 +107,16 @@ class ArxivClient:
 
         while True:
             batch_size = calculate_page_size(
-                self._config.page_size, params.start, params.max_results
+                self._config.page_size,
+                params.start,
+                params.max_results,
             )
             params.start = (page - 1) * batch_size
 
             response = await self._fetch_page(params)
-            searchresult = RootParser(await response.text()).build_search_result(
+            searchresult = RootParser(
+                await response.text(), response.url
+            ).build_search_result(
                 query_params=params,
             )
             papers = await self.parse_response(response)
@@ -97,11 +124,17 @@ class ArxivClient:
             if not papers:
                 break
 
-            yield self._build_search_metadata(searchresult, page, batch_size, papers)
+            result = self._build_search_metadata(searchresult, page, batch_size, papers)
+            await self.download_search_result(result)
+            yield result
 
             total_yielded += len(papers)
             if not self._should_continue(
-                total_yielded, max_results, searchresult.total_result, page, batch_size
+                total_yielded,
+                max_results,
+                searchresult.total_result,
+                page,
+                batch_size,
             ):
                 break
 
@@ -146,7 +179,9 @@ class ArxivClient:
         """
         try:
             page_size = calculate_page_size(
-                self._config.page_size, params.start, params.max_results
+                self._config.page_size,
+                params.start,
+                params.max_results,
             )
 
             query_params = {
@@ -198,8 +233,10 @@ class ArxivClient:
         return ArxivParser(text, response).parse_feed()
 
     async def download_paper(
-        self, paper: Paper, filename: Optional[str] = None
-    ) -> Path:
+        self,
+        paper: Paper,
+        filename: Optional[str] = None,
+    ) -> Optional[None]:
         """
         下载论文
 
@@ -208,9 +245,34 @@ class ArxivClient:
             filename: 文件名
 
         Returns:
-            下载文件的存放路径
+            None if downloader is disabled
+
+        Raises:
+            PaperDownloadException: 如果下载失败
         """
-        return await self._downloader.download_paper(str(paper.pdf_url), filename)
+        if downloader := self.downloader:
+            await downloader.download_paper(paper, filename)
+        return None
+
+    async def download_search_result(
+        self,
+        search_result: SearchResult,
+    ) -> Optional[DownloadTracker]:
+        """
+        下载搜索结果中的所有论文
+
+        Args:
+            search_result: 搜索结果
+
+        Returns:
+            DownloadTracker if enabled, None if disabled
+
+        Raises:
+            PaperDownloadException: 如果下载失败
+        """
+        if downloader := self.downloader:
+            return await downloader.batch_download(search_result)
+        return None
 
     async def close(self) -> None:
         """关闭客户端"""

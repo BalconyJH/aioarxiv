@@ -1,7 +1,7 @@
 import asyncio
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Protocol
+from typing import Optional
 from zoneinfo import ZoneInfo
 
 import aiofiles
@@ -11,15 +11,9 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 from aioarxiv.config import ArxivConfig, default_config
 from aioarxiv.exception import PaperDownloadException
 from aioarxiv.models import Paper, SearchResult
-from aioarxiv.utils import format_datetime, sanitize_title
+from aioarxiv.utils import format_datetime, log_retry_attempt, sanitize_title
 from aioarxiv.utils.log import logger
 from aioarxiv.utils.session import SessionManager
-
-
-class DownloadProtocol(Protocol):
-    """下载器协议"""
-
-    async def request(self, method: str, url: str, **kwargs) -> None: ...
 
 
 class DownloadTracker:
@@ -121,14 +115,21 @@ class ArxivDownloader:
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=4, max=10),
-        retry_error_callback=lambda retry_state: logger.warning(
-            f"重试次数: {retry_state.attempt_number}/3"
-        ),
+        retry_error_callback=log_retry_attempt,
     )
     async def download_paper(
         self, paper: Paper, filename: Optional[str] = None
     ) -> None:
-        """下载单篇论文"""
+        """
+        下载单篇论文
+
+        Args:
+            paper: 论文对象
+            filename: 文件名
+
+        Raises:
+            PaperDownloadException: 如果下载失败
+        """
         file_path, temp_path = self._prepare_paths(paper, filename)
         logger.info(f"开始下载论文: {paper.pdf_url}")
 
@@ -159,12 +160,12 @@ class ArxivDownloader:
         tasks = []
 
         for paper in search_result.papers:
-            if not paper.pdf_url:
+            if paper.pdf_url:
+                tasks.append(
+                    asyncio.create_task(self._download_with_context(paper, context))
+                )
+            else:
                 context.add_failed(paper, ValueError("No PDF URL available"))
-                continue
-
-            task = asyncio.create_task(self._download_with_context(paper, context))
-            tasks.append(task)
 
         await asyncio.gather(*tasks)
         context.end_time = datetime.now(ZoneInfo(default_config.timezone))
@@ -173,7 +174,13 @@ class ArxivDownloader:
     async def _download_with_context(
         self, paper: Paper, context: DownloadTracker
     ) -> None:
-        """下载单篇论文并更新上下文"""
+        """
+        下载单篇论文并更新上下文
+
+        Args:
+            paper: 论文对象
+            context: 下载上下文
+        """
         try:
             await self.download_paper(paper, f"{paper.info.id}.pdf")
             context.add_completed()
