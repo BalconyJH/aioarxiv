@@ -1,11 +1,11 @@
-import sys
 import inspect
 import logging
+import sys
 from typing import TYPE_CHECKING
 
 import loguru
 
-from ..config import default_config
+from aioarxiv.config import default_config
 
 if TYPE_CHECKING:
     # avoid sphinx autodoc resolve annotation failed
@@ -18,7 +18,7 @@ logger: "Logger" = loguru.logger
 default:
 
 - 格式: `[%(asctime)s %(name)s] %(levelname)s: %(message)s`
-- 等级: `INFO` ，根据 `config.log_level` 配置改变
+- 等级: `INFO` ,  根据 `config.log_level` 配置改变
 - 输出: 输出至 stdout
 
 usage:
@@ -30,9 +30,9 @@ usage:
 
 # https://loguru.readthedocs.io/en/stable/overview.html#entirely-compatible-with-standard-logging
 class LoguruHandler(logging.Handler):  # pragma: no cover
-    """logging 与 loguru 之间的桥梁，将 logging 的日志转发到 loguru。"""
+    """logging 与 loguru 之间的桥梁,  将 logging 的日志转发到 loguru。"""
 
-    def emit(self, record: logging.LogRecord):
+    def emit(self, record: logging.LogRecord) -> None:
         try:
             level = logger.level(record.levelname).name
         except ValueError:
@@ -44,12 +44,13 @@ class LoguruHandler(logging.Handler):  # pragma: no cover
             depth += 1
 
         logger.opt(depth=depth, exception=record.exc_info).log(
-            level, record.getMessage()
+            level,
+            record.getMessage(),
         )
 
 
 def default_filter(record: "Record"):
-    """默认的日志过滤器，根据 `config.log_level` 配置改变日志等级。"""
+    """默认的日志过滤器,  根据 `config.log_level` 配置改变日志等级。"""
     log_level = record["extra"].get("arxiv_log_level", default_config.log_level)
     levelno = logger.level(log_level).no if isinstance(log_level, str) else log_level
     return record["level"].no >= levelno

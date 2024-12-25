@@ -1,10 +1,11 @@
 import asyncio
-import functools
 from collections import deque
 from dataclasses import dataclass
+import functools
 from typing import Any, Callable, ClassVar, Optional, TypeVar, cast
 
-from ..config import default_config
+from aioarxiv.config import default_config
+
 from .log import logger
 
 T = TypeVar("T", bound=Callable[..., Any])
@@ -26,7 +27,7 @@ class RateLimitState:
 
 
 class RateLimiter:
-    """速率限制装饰器，使用类级别共享状态实现请求限流
+    """速率限制装饰器, 使用类级别共享状态实现请求限流
 
     使用类级别变量确保所有实例共享同一个限流状态。支持并发控制和时间窗口限流。
 
@@ -69,7 +70,7 @@ class RateLimiter:
             wait_time = cls.timestamps[0] + cls._period - now
             if wait_time > 0:
                 logger.debug(
-                    f"触发速率限制，等待{wait_time:.2f}秒",
+                    f"触发速率限制, 等待{wait_time:.2f}秒",
                     extra={
                         "wait_time": f"{wait_time:.2f}s",
                         "current_calls": len(cls.timestamps),
@@ -83,13 +84,15 @@ class RateLimiter:
 
     @classmethod
     def limit(
-        cls, calls: Optional[int] = None, period: Optional[float] = None
+        cls,
+        calls: Optional[int] = None,
+        period: Optional[float] = None,
     ) -> Callable[[T], T]:
         """创建速率限制装饰器
 
         Args:
-            calls: 时间窗口内最大请求数，默认使用配置值
-            period: 时间窗口大小(秒)，默认使用配置值
+            calls: 时间窗口内最大请求数, 默认使用配置值
+            period: 时间窗口大小(秒), 默认使用配置值
 
         Returns:
             装饰器函数

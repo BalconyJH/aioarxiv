@@ -1,4 +1,5 @@
-from typing import TYPE_CHECKING, Optional
+from types import TracebackType
+from typing import Optional
 from typing_extensions import Self
 
 from aiohttp import ClientResponse, ClientSession, ClientTimeout, TraceConfig
@@ -8,9 +9,6 @@ from aioarxiv.utils import create_trace_config
 
 from .log import logger
 from .rate_limiter import RateLimiter
-
-if TYPE_CHECKING:
-    from types import TracebackType
 
 
 class SessionManager:
@@ -67,8 +65,8 @@ class SessionManager:
             logger.trace(f"使用代理: {self._config.proxy}")
             kwargs["proxy"] = self._config.proxy
 
-        async with await self.session as client:
-            return await client.request(method, url, **kwargs)
+        client = await self.session
+        return await client.request(method, url, **kwargs)
 
     async def close(self) -> None:
         """关闭会话"""
