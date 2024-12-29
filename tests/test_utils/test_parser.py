@@ -43,27 +43,48 @@ def test_paper_parser_init(paper_entry):
 def test_parse_authors(paper_entry):
     parser = PaperParser(paper_entry)
     authors = parser.parse_authors()
-    assert len(authors) == 1
-    assert authors[0].name == "Test Author"
-    assert authors[0].affiliation == "Test University"
+    assert len(authors) == 5
+    assert authors[0].name == "David Prendergast"
+    assert authors[0].affiliation == "Department of Physics"
 
 
 def test_parse_categories(paper_entry):
     parser = PaperParser(paper_entry)
     categories = parser.parse_categories()
     assert isinstance(categories, Category)
-    assert categories.primary.term == "cs.AI"
-    assert categories.primary.label == "Artificial Intelligence"
+    assert categories.primary.term == "cond-mat.str-el"
+    assert categories.primary.label is None
     assert len(categories.secondary) == 0
 
 
 def test_parse_basic_info(paper_entry):
     parser = PaperParser(paper_entry)
     info = parser.parse_basics_info()
-    assert info.id == "1234.5678"
-    assert info.title == "Test Paper"
-    assert info.summary == "Test Summary"
-    assert len(info.authors) == 1
+    assert info.id == "0102536v1"
+    assert (
+        info.title
+        == "Impact of Electron-Electron Cusp on Configuration Interaction Energies"
+    )
+    assert (
+        info.summary
+        == """  The effect of the electron-electron cusp on the convergence of configuration
+            interaction (CI) wave functions is examined. By analogy with the
+            pseudopotential approach for electron-ion interactions, an effective
+            electron-electron interaction is developed which closely reproduces the
+            scattering of the Coulomb interaction but is smooth and finite at zero
+            electron-electron separation. The exact many-electron wave function for this
+            smooth effective interaction has no cusp at zero electron-electron separation.
+            We perform CI and quantum Monte Carlo calculations for He and Be atoms, both
+            with the Coulomb electron-electron interaction and with the smooth effective
+            electron-electron interaction. We find that convergence of the CI expansion of
+            the wave function for the smooth electron-electron interaction is not
+            significantly improved compared with that for the divergent Coulomb interaction
+            for energy differences on the order of 1 mHartree. This shows that, contrary to
+            popular belief, description of the electron-electron cusp is not a limiting
+            factor, to within chemical accuracy, for CI calculations.
+        """  # noqa: E501
+    )
+    assert len(info.authors) == 5
     assert isinstance(info.categories, Category)
     assert isinstance(info.published, datetime)
     assert isinstance(info.updated, datetime)
@@ -72,15 +93,18 @@ def test_parse_basic_info(paper_entry):
 def test_parse_pdf_url(paper_entry):
     parser = PaperParser(paper_entry)
     url = parser.parse_pdf_url()
-    assert url == cast(HttpUrl, "http://arxiv.org/pdf/1234.5678.pdf")
+    assert url == cast(HttpUrl, "http://arxiv.org/pdf/cond-mat/0102536v1")
 
 
 def test_parse_optional_fields(paper_entry):
     parser = PaperParser(paper_entry)
     fields = parser.parse_optional_fields()
-    assert fields["doi"] == "10.1234/test.123"
-    assert fields["comment"] == "Test Comment"
-    assert fields["journal_ref"] == "Test Journal"
+    assert fields["doi"] == "10.1063/1.1383585"
+    assert fields["comment"] == (
+        """11 pages, 6 figures, 3 tables, LaTeX209, submitted to The Journal of
+            Chemical Physics"""
+    )
+    assert fields["journal_ref"] == "J. Chem. Phys. 115, 1626 (2001)"
 
 
 def test_parse_datetime():
@@ -92,14 +116,14 @@ def test_parse_datetime():
 
 def test_root_parser_total_result(sample_xml):
     root = RootParser(sample_xml, URL("http://test.com"))
-    assert root.parse_total_result() == 1
+    assert root.parse_total_result() == 218712
 
 
 def test_root_parser_build_search_result(sample_xml):
     root = RootParser(sample_xml, URL("http://test.com"))
     params = SearchParams(query="test")  # pyright: ignore [reportCallIssue]
     result = root.build_search_result(params)
-    assert result.total_result == 1
+    assert result.total_result == 218712
     assert result.page == 1
     assert result.query_params == params
 
@@ -107,8 +131,8 @@ def test_root_parser_build_search_result(sample_xml):
 def test_arxiv_parser_build_paper(paper_entry):
     paper = ArxivParser.build_paper(paper_entry)
     assert isinstance(paper, Paper)
-    assert paper.info.id == "1234.5678"
-    assert str(paper.pdf_url) == "http://arxiv.org/pdf/1234.5678.pdf"
+    assert paper.info.id == "0102536v1"
+    assert str(paper.pdf_url) == "http://arxiv.org/pdf/cond-mat/0102536v1"
 
 
 @pytest.mark.asyncio
