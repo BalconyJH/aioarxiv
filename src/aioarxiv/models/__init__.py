@@ -72,7 +72,7 @@ class Paper(BaseModel):
     """论文模型"""
 
     info: BasicInfo = Field(description="基础信息")
-    doi: Optional[str] = Field(None, description="DOI,  格式需符合正则")
+    doi: Optional[str] = Field(None, description="DOI, 格式需符合正则")
     journal_ref: Optional[str] = Field(None, description="期刊引用")
     pdf_url: Optional[HttpUrl] = Field(None, description="PDF下载链接")
     comment: Optional[str] = Field(None, description="作者评论或注释")

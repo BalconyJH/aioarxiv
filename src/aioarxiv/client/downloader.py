@@ -110,7 +110,7 @@ class ArxivDownloader:
 
             async with aiofiles.open(temp_path, "wb") as f:
                 async for chunk in response.content.iter_chunked(8192):
-                    await f.write(chunk)
+                    await f.write(chunk)  # type: ignore
 
     @retry(
         stop=stop_after_attempt(3),

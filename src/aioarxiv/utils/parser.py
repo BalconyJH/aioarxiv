@@ -140,7 +140,7 @@ class RootParser:
             metadata=Metadata(
                 missing_results=0,
                 pagesize=0,
-                source=self.response_url,
+                source=URL(self.response_url),
                 end_time=None,
             ),
         )
