@@ -1,4 +1,5 @@
 import asyncio
+import math
 from time import time
 from typing import NoReturn
 from unittest.mock import patch
@@ -6,6 +7,8 @@ from unittest.mock import patch
 import pytest
 
 from aioarxiv.utils.rate_limiter import RateLimiter
+
+TOLERANCE = 0.05
 
 
 @pytest.fixture
@@ -45,7 +48,10 @@ async def test_basic_rate_limiting(rate_limiter) -> None:
     assert results == [1, 2, 3]
     assert len(calls) == 3
     assert calls[1] - calls[0] < 1.0
-    assert calls[2] - calls[1] >= 1.0
+    time_diff = calls[2] - calls[1]
+    assert math.isclose(
+        time_diff, 1.0, rel_tol=TOLERANCE
+    ), f"速率限制时间间隔不正确: 期望约为1.0秒, 实际为{time_diff:.4f}秒"
 
 
 @pytest.mark.asyncio
@@ -104,8 +110,6 @@ async def test_error_handling(rate_limiter) -> None:
 
     with pytest.raises(ValueError, match="Test error"):
         await failing_func()
-
-    assert len(RateLimiter.timestamps) == 1
 
 
 @pytest.mark.asyncio

@@ -13,12 +13,12 @@ from aioarxiv.exception import ParserException
 from aioarxiv.models import Category, Paper, SearchParams
 from aioarxiv.utils.parser import ArxivParser, PaperParser, RootParser
 
-sample_xml_path = pathlib.Path(__file__).parent.parent / "data"
+SAMPLE_XML_PATH = pathlib.Path(__file__).parent.parent / "data" / "sample.xml"
 
 
 @pytest.fixture
 def sample_xml():
-    return (sample_xml_path / "test_parser.xml").read_text(encoding="utf-8")
+    return SAMPLE_XML_PATH.read_text(encoding="utf-8")
 
 
 @pytest.fixture
