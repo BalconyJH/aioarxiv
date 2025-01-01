@@ -118,22 +118,40 @@ def format_datetime(dt: datetime) -> str:
 
 def sanitize_title(title: str, max_length: int = 50) -> str:
     """
-    清理字符串，确保可安全用作文件名，并限制长度。
+    Sanitize string to make it safe for use as a filename and limit its length.
+
+    Sanitization rules:
+    - Replace invalid characters with hyphens
+    - Remove leading and trailing hyphens
+    - Remove redundant hyphens
+    - Truncate to max_length and append ellipsis if too long
 
     Args:
-        title (str): 原始文件名
-        max_length (int): 文件名的最大长度
+        title (str): The original title/filename to sanitize
+        max_length (int, optional): Maximum length of the sanitized filename.
+        Defaults to 50. If exceeded, the string will be truncated and '...' appended.
 
     Returns:
-        str: 清理后的文件名, 如果超过最大长度, 则截断并添加省略号
+        str: The sanitized filename. If length exceeds max_length, returns truncated
+        string with '...' appended.
+
+    Examples:
+        >>> sanitize_title("file/with*invalid:chars")
+        'file-with-invalid-chars'
+        >>> sanitize_title("very...long...title", max_length=10)
+        'very-lo...'
     """
-    sanitized = re.sub(r'[\\/*?:"<>|]', "-", title).strip()
+    # Strip whitespace and replace invalid chars with single hyphen
+    sanitized = re.sub(r'[\\/*?:"<>|]+', "-", title.strip()).strip("-")
+
+    # Truncate and append ellipsis if too long
     if len(sanitized) > max_length:
-        sanitized = sanitized[: max_length - 3].rstrip("-") + "..."
+        sanitized = f"{sanitized[: max_length - 3].rstrip('-')}..."
+
     return sanitized
 
 
 def log_retry_attempt(retry_state: RetryCallState) -> None:
     logger.warning(
-        f"重试次数: {retry_state.attempt_number}/{default_config.max_retries}"
+        f"retry times: {retry_state.attempt_number}/{default_config.max_retries}"
     )
