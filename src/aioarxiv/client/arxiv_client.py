@@ -66,7 +66,6 @@ class ArxivClient:
                     update={
                         "end_time": datetime.now(tz=ZoneInfo(default_config.timezone)),
                         "pagesize": self._config.page_size,
-                        "source": "arxiv",
                     },
                 ),
             },
