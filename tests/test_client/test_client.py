@@ -1,152 +1,28 @@
-# tests/test_client.py
-from datetime import datetime
-import pathlib
+from datetime import datetime, timedelta
 from pathlib import Path
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
-from aiohttp import ClientResponse
-from pydantic import AnyUrl, HttpUrl
 import pytest
 from yarl import URL
 
 from aioarxiv.client.arxiv_client import ArxivClient
-from aioarxiv.config import ArxivConfig, default_config
 from aioarxiv.models import (
-    Author,
-    BasicInfo,
-    Category,
     Metadata,
-    Paper,
-    PrimaryCategory,
-    SearchParams,
-    SearchResult,
     SortCriterion,
     SortOrder,
 )
 
-SAMPLE_XML_PATH = pathlib.Path(__file__).parent.parent / "data" / "sample.xml"
-
-
-@pytest.fixture
-def mock_session_manager(mocker):
-    """创建模拟的会话管理器"""
-    manager = mocker.Mock()
-    manager.request = mocker.AsyncMock()
-    manager.close = mocker.AsyncMock()
-    return manager
-
-
-@pytest.fixture
-def mock_response(mocker, mock_feed_response):
-    """创建模拟的 HTTP 响应"""
-    response = mocker.Mock(spec=ClientResponse)
-    response.status = 200
-    response.text = mocker.AsyncMock(return_value=mock_feed_response)
-    response.url = "http://export.arxiv.org/api/query"
-    return response
-
-
-@pytest.fixture
-def mock_datetime(mocker):
-    """固定时间为 2025-01-01 00:02:00 UTC"""
-    fixed_dt = datetime(2025, 1, 1, 0, 2, 0, tzinfo=ZoneInfo("UTC"))
-    datetime_mock = mocker.patch("aioarxiv.models.datetime")
-    datetime_mock.now.return_value = fixed_dt
-    return fixed_dt
-
-
-@pytest.fixture
-def client(mock_session_manager):
-    """创建测试客户端"""
-    return ArxivClient(session_manager=mock_session_manager)
-
-
-@pytest.fixture
-def sample_author():
-    """创建示例作者"""
-    return Author(name="BalconyJH", affiliation="Test University")
-
-
-@pytest.fixture
-def sample_category():
-    """创建示例分类"""
-    return Category(
-        primary=PrimaryCategory(
-            term="cs.AI",
-            scheme=AnyUrl("http://arxiv.org/schemas/atom"),
-            label="Artificial Intelligence",
-        ),
-        secondary=["cs.LG", "stat.ML"],
-    )
-
-
-@pytest.fixture
-def sample_basic_info(sample_author, sample_category, mock_datetime):
-    """创建示例基础信息"""
-    return BasicInfo(
-        id="2312.12345",
-        title="Test Paper Title",
-        summary="Test paper summary",
-        authors=[sample_author],
-        categories=sample_category,
-        published=mock_datetime,
-        updated=mock_datetime,
-    )
-
-
-@pytest.fixture
-def sample_paper(sample_basic_info):
-    """创建示例论文"""
-    return Paper(
-        info=sample_basic_info,
-        doi="10.1234/test.123",
-        journal_ref="Test Journal Vol.1",
-        pdf_url=HttpUrl("http://arxiv.org/pdf/2312.12345"),
-        comment="Test comment",
-    )
-
-
-@pytest.fixture
-def sample_metadata(mock_datetime):
-    """创建示例元数据"""
-    return Metadata(
-        start_time=mock_datetime,
-        missing_results=0,
-        pagesize=10,
-        source=URL("http://export.arxiv.org/api/query"),
-        end_time=None,
-    )
-
-
-@pytest.fixture
-def sample_search_result(sample_paper, sample_metadata):
-    """创建示例搜索结果"""
-    return SearchResult(
-        papers=[sample_paper],
-        total_result=1,
-        page=1,
-        has_next=False,
-        query_params=SearchParams(query="test query"),  # pyright: ignore [reportCallIssue]
-        metadata=sample_metadata,
-    )
-
-
-@pytest.fixture
-def mock_feed_response():
-    """创建模拟的 XML feed 响应"""
-    return SAMPLE_XML_PATH.read_text(encoding="utf-8")
-
 
 @pytest.mark.asyncio
-async def test_client_initialization():
+async def test_client_initialization(mock_config):
     """测试客户端初始化"""
     client = ArxivClient()
-    assert client._config == default_config
+    assert client._config == mock_config
     assert client._enable_downloader is False
     assert client.download_dir is None
 
-    custom_config = ArxivConfig(page_size=50)
+    custom_config = mock_config.model_copy(update={"page_size": 10})
     download_dir = Path("./downloads")
     client = ArxivClient(
         config=custom_config, enable_downloader=True, download_dir=download_dir
@@ -157,12 +33,14 @@ async def test_client_initialization():
 
 
 @pytest.mark.asyncio
-async def test_build_search_metadata(client, sample_search_result, sample_paper):
+async def test_build_search_metadata(
+    mock_arxiv_client, sample_search_result, sample_paper, mock_config
+):
     """测试搜索元数据构建"""
     # 创建一个新的元数据对象，确保 source 是 URL 类型
     metadata = Metadata(
-        start_time=datetime.now(tz=ZoneInfo(default_config.timezone)),
-        end_time=datetime.now(tz=ZoneInfo(default_config.timezone)),
+        start_time=datetime.now(tz=ZoneInfo(mock_config.timezone)),
+        end_time=datetime.now(tz=ZoneInfo(mock_config.timezone)),
         missing_results=0,
         pagesize=10,
         source=URL("http://export.arxiv.org/api/query"),
@@ -171,14 +49,14 @@ async def test_build_search_metadata(client, sample_search_result, sample_paper)
     # 更新 search_result 的元数据
     search_result = sample_search_result.model_copy(update={"metadata": metadata})
 
-    updated_result = client._build_search_metadata(
+    updated_result = mock_arxiv_client._build_search_metadata(
         search_result, page=1, batch_size=10, papers=[sample_paper]
     )
 
     assert len(updated_result.papers) == 1
     assert updated_result.page == 1
     assert updated_result.has_next is False
-    assert updated_result.metadata.pagesize == client._config.page_size
+    assert updated_result.metadata.pagesize == mock_arxiv_client._config.page_size
     assert isinstance(updated_result.metadata.source, URL)
 
 
@@ -186,7 +64,7 @@ async def test_build_search_metadata(client, sample_search_result, sample_paper)
 async def test_metadata_duration_calculation(mock_datetime):
     """测试元数据持续时间计算"""
     start_time = mock_datetime
-    end_time = datetime(2025, 1, 1, 0, 2, 1, tzinfo=ZoneInfo("UTC"))
+    end_time = mock_datetime + timedelta(seconds=1)
 
     metadata = Metadata(
         start_time=start_time,
@@ -201,7 +79,9 @@ async def test_metadata_duration_calculation(mock_datetime):
 
 
 @pytest.mark.asyncio
-async def test_search_with_params(client, mock_response, mock_session_manager):
+async def test_search_with_params(
+    mock_arxiv_client, mock_response, mock_session_manager, mock_config
+):
     """测试带参数的搜索"""
     mock_session_manager.request.return_value = mock_response
 
@@ -213,7 +93,7 @@ async def test_search_with_params(client, mock_response, mock_session_manager):
     }
 
     results = []
-    async for result in client.search(**params):
+    async for result in mock_arxiv_client.search(**params):
         results.append(result)
 
     assert len(results) == 5
@@ -248,7 +128,7 @@ async def test_search_with_params(client, mock_response, mock_session_manager):
 
     query_params = kwargs["params"]
     assert query_params["search_query"] == "neural networks"
-    assert query_params["max_results"] == default_config.page_size
+    assert query_params["max_results"] == mock_config.page_size
     assert query_params["sortBy"] == SortCriterion.SUBMITTED.value
     assert query_params["sortOrder"] == SortOrder.ASCENDING.value
 
@@ -260,9 +140,9 @@ def test_search_result_computed_fields(sample_search_result):
 
 
 @pytest.mark.asyncio
-async def test_client_context_manager(client):
+async def test_client_context_manager(mock_arxiv_client):
     """测试客户端上下文管理器"""
-    async with client as c:
+    async with mock_arxiv_client as c:
         assert isinstance(c, ArxivClient)
 
-    client._session_manager.close.assert_awaited_once()
+    mock_arxiv_client._session_manager.close.assert_awaited_once()
