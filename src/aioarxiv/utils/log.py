@@ -1,11 +1,11 @@
 import inspect
 import logging
 import sys
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 import loguru
 
-from aioarxiv.config import default_config
+from aioarxiv.config import ArxivConfig, default_config
 
 if TYPE_CHECKING:
     # avoid sphinx autodoc resolve annotation failed
@@ -26,6 +26,19 @@ usage:
     from log import logger
     ```
 """
+
+_current_config: Optional[ArxivConfig] = None
+
+
+def set_config(config: ArxivConfig) -> None:
+    """设置当前全局配置"""
+    global _current_config
+    _current_config = config
+
+
+def get_config() -> ArxivConfig:
+    """获取当前配置或默认配置"""
+    return _current_config or default_config
 
 
 # https://loguru.readthedocs.io/en/stable/overview.html#entirely-compatible-with-standard-logging
@@ -51,7 +64,12 @@ class LoguruHandler(logging.Handler):  # pragma: no cover
 
 def default_filter(record: "Record"):
     """默认的日志过滤器,  根据 `config.log_level` 配置改变日志等级。"""
-    log_level = record["extra"].get("arxiv_log_level", default_config.log_level)
+    log_level = record["extra"].get("arxiv_log_level")
+
+    if log_level is None:
+        config = get_config()
+        log_level = config.log_level if config else default_config.log_level
+
     levelno = logger.level(log_level).no if isinstance(log_level, str) else log_level
     return record["level"].no >= levelno
 
