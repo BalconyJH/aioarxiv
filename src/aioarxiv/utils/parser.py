@@ -67,7 +67,7 @@ class ArxivParser:
         解析根元素
 
         Returns:
-            tuple[list[Paper], int]: 论文列表和总结果数
+            list[Paper]: 论文列表
         """
         papers = []
         for i, entry in enumerate(self.entry.findall("atom:entry", ArxivParser.NS)):
@@ -89,10 +89,12 @@ class ArxivParser:
         解析arXiv API的Atom feed内容
 
         Returns:
-            tuple[list[Paper], int]: 论文列表和总结果数
+            list[Paper]: 论文列表
         """
         try:
-            return self._parse_root()
+            papers = self._parse_root()
+            logger.trace(f"Parsed {len(papers)} papers")
+            return papers
         except ET.ParseError as e:
             raise create_parser_exception(
                 self.entry,
