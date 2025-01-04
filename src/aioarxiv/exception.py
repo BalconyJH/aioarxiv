@@ -97,15 +97,6 @@ class TimeoutException(ArxivException):
         return "\n".join(error_msg)
 
 
-class RetryError(ArxivException):
-    """重试次数用尽异常"""
-
-    def __init__(self, attempts: int, last_error: Exception) -> None:
-        self.attempts = attempts
-        self.last_error = last_error
-        super().__init__(f"Failed after {attempts} attempts. Last error: {last_error}")
-
-
 @dataclass
 class ConfigError:
     """配置错误详情"""
