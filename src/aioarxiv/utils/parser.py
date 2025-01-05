@@ -105,13 +105,6 @@ class ArxivParser:
         except ParserException:
             raise
 
-
-class RootParser:
-    def __init__(self, response_context: str, response_url: URL) -> None:
-        self.response_context = response_context
-        self.response_url = response_url
-        self.entry = ET.fromstring(response_context)
-
     def parse_total_result(self) -> int:
         """
         解析总结果数
@@ -134,7 +127,7 @@ class RootParser:
 
     def build_search_result(self, query_params: SearchParams) -> SearchResult:
         return SearchResult(
-            papers=[],
+            papers=self.parse_feed(),
             total_result=self.parse_total_result(),
             page=1,
             has_next=False,
@@ -142,7 +135,7 @@ class RootParser:
             metadata=Metadata(
                 missing_results=0,
                 pagesize=0,
-                source=URL(self.response_url),
+                source=URL(self.raw_response.url),
                 end_time=None,
             ),
         )
