@@ -19,11 +19,11 @@ from aioarxiv.utils.session import SessionManager
 class DownloadTracker:
     """批量下载上下文"""
 
-    def __init__(self, total: int, start_time: Optional[datetime] = None) -> None:
+    def __init__(self, total: int) -> None:
         self.total = total
         self.completed = 0
         self.failed = 0
-        self.start_time = start_time or datetime.now(ZoneInfo(default_config.timezone))
+        self.start_time = datetime.now(ZoneInfo(default_config.timezone))
         self.end_time: Optional[datetime] = None
         self._failed_papers: list[tuple[Paper, Exception]] = []
 
@@ -112,6 +112,26 @@ class ArxivDownloader:
                 async for chunk in response.content.iter_chunked(8192):
                     await f.write(chunk)  # type: ignore
 
+    async def _download_with_context(
+        self, paper: Paper, context: DownloadTracker
+    ) -> None:
+        """
+        下载单篇论文并更新上下文
+
+        Args:
+            paper: 论文对象
+            context: 下载上下文
+        """
+        try:
+            await self.download_paper(paper, f"{paper.info.id}.pdf")
+            context.add_completed()
+        except Exception as e:
+            context.add_failed(paper, e)
+            logger.error(
+                f"论文 {paper.info.id} 下载失败: {e!s}",
+                extra={"paper_id": paper.info.id},
+            )
+
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=4, max=10),
@@ -137,6 +157,8 @@ class ArxivDownloader:
             await self._download_to_temp(str(paper.pdf_url), temp_path)
             temp_path.rename(file_path)
             logger.info(f"下载完成: {file_path}")
+            file_size = file_path.stat().st_size
+            logger.debug(f"文件大小: {file_size / 1024:.1f} KB")
         except Exception as e:
             logger.error(f"下载失败: {e}")
             temp_path.unlink(missing_ok=True)
@@ -170,23 +192,3 @@ class ArxivDownloader:
         await asyncio.gather(*tasks)
         context.end_time = datetime.now(ZoneInfo(default_config.timezone))
         return context
-
-    async def _download_with_context(
-        self, paper: Paper, context: DownloadTracker
-    ) -> None:
-        """
-        下载单篇论文并更新上下文
-
-        Args:
-            paper: 论文对象
-            context: 下载上下文
-        """
-        try:
-            await self.download_paper(paper, f"{paper.info.id}.pdf")
-            context.add_completed()
-        except Exception as e:
-            context.add_failed(paper, e)
-            logger.error(
-                f"论文 {paper.info.id} 下载失败: {e!s}",
-                extra={"paper_id": paper.info.id},
-            )
