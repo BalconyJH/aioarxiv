@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 import re
@@ -95,8 +96,8 @@ class SearchParams(BaseModel):
 
     query: str = Field(description="搜索关键词")
     id_list: Optional[list[str]] = Field(None, description="需要精确搜索的ID列表")
-    start: int = Field(default=0, ge=0, description="起始索引")
-    max_results: Optional[int] = Field(default=None, gt=0, description="最大返回结果数")
+    start: Optional[int] = Field(default=0, ge=0, description="起始索引")
+    max_results: Optional[int] = Field(default=10, gt=0, description="最大返回结果数")
     sort_by: Optional[SortCriterion] = Field(None, description="排序标准")
     sort_order: Optional[SortOrder] = Field(None, description="排序方向")
 
@@ -173,3 +174,9 @@ class DownloadStats(BaseModel):
     ]
 
     model_config = {"arbitrary_types_allowed": True}
+
+
+@dataclass
+class PageParam:
+    start: int
+    end: int
