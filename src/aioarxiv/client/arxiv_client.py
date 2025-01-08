@@ -10,6 +10,7 @@ from aiohttp import ClientResponse
 from aioarxiv.config import ArxivConfig, default_config
 from aioarxiv.exception import HTTPException, QueryBuildError, QueryContext
 from aioarxiv.models import (
+    Metadata,
     PageParam,
     Paper,
     SearchParams,
@@ -165,53 +166,56 @@ class ArxivClient:
         sort_by: Optional[SortCriterion] = None,
         sort_order: Optional[SortOrder] = None,
         start: Optional[int] = None,
-    ) -> list[SearchResult]:
-        result, needs_more = await self._prepare_initial_search(
-            query,
-            start,
-            id_list,
-            max_results,
-            sort_by,
-            sort_order,
-        )
-
-        if not needs_more:
-            return [result]
-
-        remaining = min(
-            max_results - len(result.papers) if max_results else result.total_result,
-            result.total_result - len(result.papers),
-        )
-
-        base_start = (start or 0) + self._config.page_size
-        page_size = self._config.page_size
-        total_pages = (remaining + page_size - 1) // page_size
-
-        page_params = []
-        for page in range(total_pages):
-            page_start = base_start + page * page_size
-            page_end = min(page_start + page_size, base_start + remaining)
-            if page_end > page_start:
-                page_params.append(PageParam(start=page_start, end=page_end))
-
-        logger.debug(f"Page params list: {page_params}")
-
-        tasks = await self._create_batch_tasks(query, page_params, sort_by, sort_order)
-
+    ) -> SearchResult:
         try:
-            responses = await asyncio.gather(*tasks, return_exceptions=True)
-            valid_results = [result]
+            # Get initial search results
+            first_page_result, should_fetch_more = await self._prepare_initial_search(
+                query=query,
+                start=start,
+                id_list=id_list,
+                max_results=max_results,
+                sort_by=sort_by,
+                sort_order=sort_order,
+            )
 
-            for r in responses:
-                if isinstance(r, SearchResult):
-                    valid_results.append(r)
-                elif isinstance(r, Exception):
-                    logger.error(f"Task failed: {r}")
+            if not should_fetch_more:
+                return first_page_result
 
-            return valid_results
+            # Calculate pagination parameters
+            papers_received = len(first_page_result.papers)
+            remaining_papers = min(
+                (max_results - papers_received)
+                if max_results
+                else first_page_result.total_result,
+                first_page_result.total_result - papers_received,
+            )
+
+            if remaining_papers <= 0:
+                return first_page_result
+
+            # Prepare batch requests parameters
+            page_params = self._generate_page_params(
+                base_start=(start or 0) + self._config.page_size,
+                remaining_papers=remaining_papers,
+                page_size=self._config.page_size,
+            )
+
+            logger.debug(f"Fetching {len(page_params)} additional pages")
+
+            # Execute batch requests
+            additional_results = await self._fetch_batch_results(
+                query=query,
+                page_params=page_params,
+                sort_by=sort_by,
+                sort_order=sort_order,
+            )
+
+            return self.aggregate_search_results(
+                [first_page_result, *additional_results]
+            )
 
         except Exception as e:
-            logger.error(f"Batch search failed: {e}")
+            logger.error(f"Search operation failed: {e!s}", exc_info=True)
             raise
 
     async def _fetch_page(self, params: SearchParams) -> ClientResponse:
@@ -225,6 +229,44 @@ class ArxivClient:
             raise HTTPException(response.status)
 
         return response
+
+    @staticmethod
+    def _generate_page_params(
+        base_start: int, remaining_papers: int, page_size: int
+    ) -> list[PageParam]:
+        total_pages = (remaining_papers + page_size - 1) // page_size
+        page_params = []
+
+        for page in range(total_pages):
+            page_start = base_start + page * page_size
+            page_end = min(page_start + page_size, base_start + remaining_papers)
+            if page_end > page_start:
+                page_params.append(PageParam(start=page_start, end=page_end))
+
+        return page_params
+
+    async def _fetch_batch_results(
+        self,
+        query: str,
+        page_params: list[PageParam],
+        sort_by: Optional[SortCriterion],
+        sort_order: Optional[SortOrder],
+    ) -> list[SearchResult]:
+        tasks = await self._create_batch_tasks(query, page_params, sort_by, sort_order)
+
+        if not tasks:
+            return []
+
+        responses = await asyncio.gather(*tasks, return_exceptions=True)
+        valid_results = []
+
+        for response in responses:
+            if isinstance(response, SearchResult):
+                valid_results.append(response)
+            elif isinstance(response, Exception):
+                logger.error(f"Batch task failed: {response!s}", exc_info=True)
+
+        return valid_results
 
     def _build_query_params(self, params: SearchParams) -> dict:
         """
@@ -272,22 +314,6 @@ class ArxivClient:
                 original_error=e,
             ) from e
 
-    async def parse_response(self, response: ClientResponse) -> list[Paper]:
-        """
-        解析API响应
-
-        Args:
-            response: 响应对象
-
-        Returns:
-            解析后的论文列表和总结果数
-
-        Raises:
-            ParserException: 如果解析失败
-        """
-        text = await response.text()
-        return ArxivParser(text, response).parse_feed()
-
     async def download_paper(
         self,
         paper: Paper,
@@ -329,6 +355,74 @@ class ArxivClient:
         if downloader := self.downloader:
             return await downloader.batch_download(search_result)
         return None
+
+    @staticmethod
+    def _merge_paper_lists(
+        papers_lists: list[list[Paper]], *, keep_latest: bool = True
+    ) -> list[Paper]:
+        unique_papers: dict[str, Paper] = {}
+
+        for papers in papers_lists:
+            for paper in papers:
+                paper_id = paper.info.id
+                if paper_id not in unique_papers or (
+                    keep_latest
+                    and paper.info.updated > unique_papers[paper_id].info.updated
+                ):
+                    unique_papers[paper_id] = paper
+
+        return list(unique_papers.values())
+
+    def aggregate_search_results(self, results: list[SearchResult]) -> SearchResult:
+        if not results:
+            raise ValueError("Results list cannot be empty")
+
+        papers_lists = [result.papers for result in results]
+        merged_papers = self._merge_paper_lists(papers_lists)
+
+        base_result = results[0]
+        base_timezone = base_result.metadata.start_time.tzinfo
+
+        aggregated_metadata = Metadata(
+            start_time=min(
+                result.metadata.start_time.astimezone(base_timezone)
+                for result in results
+            ),
+            end_time=max(
+                (
+                    result.metadata.end_time.astimezone(base_timezone)
+                    for result in results
+                    if result.metadata.end_time is not None
+                ),
+                default=None,
+            ),
+            missing_results=sum(result.metadata.missing_results for result in results),
+            pagesize=sum(result.metadata.pagesize for result in results),
+            source=base_result.metadata.source,
+        )
+
+        aggregated_params = base_result.query_params.model_copy(
+            update={
+                "max_results": len(merged_papers),
+                "start": min(result.query_params.start or 0 for result in results),
+            }
+        )
+
+        aggregated_result = SearchResult(
+            papers=merged_papers,
+            total_result=max(result.total_result for result in results),
+            page=max(result.page for result in results),
+            has_next=any(result.has_next for result in results),
+            query_params=aggregated_params,
+            metadata=aggregated_metadata,
+        )
+
+        logger.debug(
+            f"Aggregated {len(results)} search results with {len(merged_papers)} "
+            f"unique papers."
+        )
+
+        return aggregated_result
 
     async def close(self) -> None:
         """关闭客户端"""
