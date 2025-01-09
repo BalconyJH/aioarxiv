@@ -34,6 +34,14 @@ class ArxivClient:
         enable_downloader: bool = False,
         download_dir: Optional[Path] = None,
     ) -> None:
+        """Initialize ArxivClient with optional configuration.
+
+        Args:
+            config (Optional[ArxivConfig]): Custom configuration for the client.
+            session_manager (Optional[SessionManager]): Custom session manager.
+            enable_downloader (bool): Whether to enable the paper downloader.
+            download_dir (Optional[Path]): Directory path for downloading papers.
+        """
         self._config = config or default_config
         self._session_manager = session_manager or SessionManager(config=self._config)
         self.download_dir = download_dir
@@ -44,9 +52,9 @@ class ArxivClient:
 
     @property
     def downloader(self) -> Optional[ArxivDownloader]:
-        """懒加载下载器"""
+        """Get the downloader instance if enabled."""
         if not self._enable_downloader:
-            logger.debug("下载器未启用")
+            logger.debug("Downloader is disabled")
             return None
         if self._downloader is None:
             self._downloader = ArxivDownloader(
@@ -63,6 +71,17 @@ class ArxivClient:
         batch_size: int,
         papers: list[Paper],
     ) -> SearchResult:
+        """Build search result metadata with updated information.
+
+        Args:
+            searchresult (SearchResult): Search result object.
+            page (int): Page number of the search result.
+            batch_size (int): Number of papers fetched in the batch.
+            papers (list[Paper]): List of papers fetched in the batch.
+
+        Returns:
+            SearchResult: Search result object with updated metadata.
+        """
         has_next = searchresult.total_result > (page * batch_size)
         metadata = searchresult.metadata.model_copy(
             update={
@@ -88,7 +107,20 @@ class ArxivClient:
         sort_by: Optional[SortCriterion],
         sort_order: Optional[SortOrder],
     ) -> tuple[SearchResult, bool]:
-        """准备初始搜索"""
+        """Prepare the initial search request and fetch the first page of results.
+
+        Args:
+            query (str): The search query string.
+            start (Optional[int]): Index of first result to retrieve.
+            id_list (Optional[list[str]]): List of arXiv IDs to retrieve.
+            max_results (Optional[int]): Maximum number of results to return.
+            sort_by (Optional[SortCriterion]): Criterion to sort results by.
+            sort_order (Optional[SortOrder]): Order of sorting.
+
+        Returns:
+            tuple[SearchResult, bool]: Tuple containing search result and flag
+                indicating whether more results need to be fetched.
+        """
         page_size = min(self._config.page_size, max_results or self._config.page_size)
 
         params = SearchParams(
@@ -120,7 +152,15 @@ class ArxivClient:
     async def _fetch_and_update_result(
         self, params: SearchParams, page: int
     ) -> SearchResult:
-        """获取并更新搜索结果"""
+        """Fetch a single page of search results and update metadata.
+
+        Args:
+            params (SearchParams): Search parameters for the API request.
+            page (int): Page number of the search result.
+
+        Returns:
+            SearchResult: Search result with updated metadata.
+        """
         response = await self._fetch_page(params)
         result = ArxivParser(await response.text(), response).build_search_result(
             params
@@ -139,8 +179,18 @@ class ArxivClient:
         page_params: list[PageParam],
         sort_by: Optional[SortCriterion] = None,
         sort_order: Optional[SortOrder] = None,
-    ) -> list[asyncio.Task]:
-        """创建批量任务"""
+    ) -> list[asyncio.Task[SearchResult]]:
+        """Create a list of tasks to fetch multiple pages of search results.
+
+        Args:
+            query (str): The search query string.
+            page_params (list[PageParam]): List of page parameters for batch requests.
+            sort_by (Optional[SortCriterion]): Criterion to sort results by.
+            sort_order (Optional[SortOrder]): Order of sorting.
+
+        Returns:
+            list[asyncio.Task[SearchResult]]: List of tasks to fetch search results.
+        """
         return [
             asyncio.create_task(
                 self._fetch_and_update_result(
@@ -167,6 +217,28 @@ class ArxivClient:
         sort_order: Optional[SortOrder] = None,
         start: Optional[int] = None,
     ) -> SearchResult:
+        """Search arXiv papers based on given parameters.
+
+        Args:
+            query (str): The search query string.
+            id_list (Optional[list[str]], optional): List of arXiv IDs to retrieve.
+                Defaults to None.
+            max_results (Optional[int], optional): Maximum number of results to return.
+                Defaults to None (uses config default).
+            sort_by (Optional[SortCriterion], optional): Criterion to sort results by.
+                Defaults to None.
+            sort_order (Optional[SortOrder], optional): Order of sorting. Defaults to
+                None.
+            start (Optional[int], optional): Index of first result to retrieve.
+                Defaults to None (starts from beginning).
+
+        Returns:
+            SearchResult: Object containing search results and metadata.
+
+        Raises:
+            HTTPException: If the API request fails.
+            QueryBuildError: If there's an error building the search query.
+        """
         try:
             # Get initial search results
             first_page_result, should_fetch_more = await self._prepare_initial_search(
@@ -219,7 +291,17 @@ class ArxivClient:
             raise
 
     async def _fetch_page(self, params: SearchParams) -> ClientResponse:
-        """获取单页结果"""
+        """Fetch a single page of results from arXiv API.
+
+        Args:
+            params (SearchParams): Search parameters for the API request.
+
+        Returns:
+            ClientResponse: HTTP response from the arXiv API.
+
+        Raises:
+            HTTPException: If the API request returns a non-200 status code.
+        """
         query_params = self._build_query_params(params)
         response = await self._session_manager.request(
             "GET", str(self._config.base_url), params=query_params
@@ -234,6 +316,17 @@ class ArxivClient:
     def _generate_page_params(
         base_start: int, remaining_papers: int, page_size: int
     ) -> list[PageParam]:
+        """
+        Generate page parameters for batch requests.
+
+        Args:
+            base_start (int): Starting index for the first page.
+            remaining_papers (int): Number of papers remaining to fetch.
+            page_size (int): Number of papers to fetch per page.
+
+        Returns:
+            list[PageParam]: List of page parameters for batch requests.
+        """
         total_pages = (remaining_papers + page_size - 1) // page_size
         page_params = []
 
@@ -252,6 +345,18 @@ class ArxivClient:
         sort_by: Optional[SortCriterion],
         sort_order: Optional[SortOrder],
     ) -> list[SearchResult]:
+        """
+        Fetch multiple pages of results from arXiv API.
+
+        Args:
+            query (str): The search query string.
+            page_params (list[PageParam]): List of page parameters for batch requests.
+            sort_by (Optional[SortCriterion]): Criterion to sort results by.
+            sort_order (Optional[SortOrder]): Order of sorting.
+
+        Returns:
+            list[SearchResult]: List of search results from batch requests.
+        """
         tasks = await self._create_batch_tasks(query, page_params, sort_by, sort_order)
 
         if not tasks:
@@ -270,16 +375,16 @@ class ArxivClient:
 
     def _build_query_params(self, params: SearchParams) -> dict:
         """
-        构建查询参数
+        Build query parameters for arXiv API request.
 
         Args:
-            params: 搜索参数模型
+            params (SearchParams): Search parameters for the API request.
 
         Returns:
-            dict: 查询参数
+            dict: Query parameters for the API request.
 
         Raises:
-            QueryBuildError: 如果构建查询参数失败
+            QueryBuildError: If there's an error building the search query.
         """
         try:
             query_params = {
@@ -301,7 +406,7 @@ class ArxivClient:
 
         except Exception as e:
             raise QueryBuildError(
-                message="构建查询参数失败",
+                message="Search query build failed",
                 context=QueryContext(
                     params={
                         "page_size": self._config.page_size,
@@ -319,18 +424,18 @@ class ArxivClient:
         paper: Paper,
         filename: Optional[str] = None,
     ) -> Optional[None]:
-        """
-        下载论文
+        """Download a single paper from arXiv.
 
         Args:
-            paper: 论文对象
-            filename: 文件名
+            paper (Paper): Paper object containing download information.
+            filename (Optional[str], optional): Custom filename for the downloaded
+                paper. Defaults to None.
 
         Returns:
-            None if downloader is disabled
+            Optional[None]: None if downloader is disabled.
 
         Raises:
-            PaperDownloadException: 如果下载失败
+            PaperDownloadException: If paper download fails.
         """
         if downloader := self.downloader:
             await downloader.download_paper(paper, filename)
@@ -340,17 +445,14 @@ class ArxivClient:
         self,
         search_result: SearchResult,
     ) -> Optional[DownloadTracker]:
-        """
-        下载搜索结果中的所有论文
+        """Download all papers from a search result.
 
         Args:
-            search_result: 搜索结果
+            search_result (SearchResult): Search result containing papers to download.
 
         Returns:
-            DownloadTracker if enabled, None if disabled
-
-        Raises:
-            PaperDownloadException: 如果下载失败
+            Optional[DownloadTracker]: Download tracker if downloader is enabled,
+                None otherwise.
         """
         if downloader := self.downloader:
             return await downloader.batch_download(search_result)
@@ -360,6 +462,19 @@ class ArxivClient:
     def _merge_paper_lists(
         papers_lists: list[list[Paper]], *, keep_latest: bool = True
     ) -> list[Paper]:
+        """
+        Merge multiple lists of papers into a single list.
+
+        Args:
+            papers_lists (list[list[Paper]]): List of lists of papers to merge.
+            keep_latest (bool): Whether to keep the latest version of each paper.
+
+        Returns:
+            list[Paper]: List of unique papers.
+
+        Raises:
+            ValueError: If papers_lists is empty.
+        """
         unique_papers: dict[str, Paper] = {}
 
         for papers in papers_lists:
@@ -374,6 +489,17 @@ class ArxivClient:
         return list(unique_papers.values())
 
     def aggregate_search_results(self, results: list[SearchResult]) -> SearchResult:
+        """Aggregate multiple search results into a single result.
+
+        Args:
+            results (list[SearchResult]): List of search results to aggregate.
+
+        Returns:
+            SearchResult: Combined search result with merged papers and metadata.
+
+        Raises:
+            ValueError: If results list is empty.
+        """
         if not results:
             raise ValueError("Results list cannot be empty")
 
@@ -425,10 +551,15 @@ class ArxivClient:
         return aggregated_result
 
     async def close(self) -> None:
-        """关闭客户端"""
+        """Close the client and cleanup resources."""
         await self._session_manager.close()
 
     async def __aenter__(self) -> "ArxivClient":
+        """Enter the async context manager.
+
+        Returns:
+            ArxivClient: The client instance.
+        """
         return self
 
     async def __aexit__(
@@ -437,4 +568,11 @@ class ArxivClient:
         exc_val: Optional[BaseException],
         exc_tb: Optional[TracebackType],
     ) -> None:
+        """Exit the async context manager and cleanup resources.
+
+        Args:
+            exc_type: Exception type if an exception occurred.
+            exc_val: Exception value if an exception occurred.
+            exc_tb: Exception traceback if an exception occurred.
+        """
         await self.close()
