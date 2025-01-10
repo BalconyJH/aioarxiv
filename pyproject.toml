@@ -72,6 +72,7 @@ keep-runtime-typing = true
 [tool.pyright]
 pythonVersion = "3.9"
 pythonPlatform = "All"
+venv = ".venv"
 executionEnvironments = [
     { root = "./tests", extraPaths = [
         "./",
@@ -92,6 +93,7 @@ test = [
     "pytest-mock>=3.14.0",
 ]
 dev = [
+    "pyright[nodejs]>=1.1.391",
     "ruff>=0.8",
     "pre-commit~=4.0",
     "bump-my-version>=0.28.1",

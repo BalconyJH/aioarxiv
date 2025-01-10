@@ -50,7 +50,7 @@ runs:
       run: |
         cd ${{ inputs.env-dir }}
         
-        install_cmd="pdm install -g"
+        install_cmd="pdm install"
         
         if [ ! -z "${{ inputs.with-groups }}" ]; then
           IFS=',' read -ra groups <<< "${{ inputs.with-groups }}"

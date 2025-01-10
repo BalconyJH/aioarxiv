@@ -56,10 +56,7 @@ jobs:
           env-dir: "."
 
       - name: Run Pyright
-        uses: jakebailey/pyright-action@v2
-        with:
-          python-version: ${{ matrix.python-version }}
-          python-platform: "Linux"
-          extra-args: >-
-            ${{ github.event.inputs.debug-mode == 'true' && '--warnings --verbose --level verbose' || '--warnings --verbose' }}
-          annotate: true
+        shell: bash
+        run: |
+          extra_args="${{ github.event.inputs.debug-mode == 'true' && '--warnings --verbose --level verbose' || '--warnings --verbose' }}"
+          pdm run pyright . $extra_args
