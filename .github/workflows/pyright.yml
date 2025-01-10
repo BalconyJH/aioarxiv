@@ -58,8 +58,6 @@ jobs:
       - name: Run Pyright
         uses: jakebailey/pyright-action@v2
         with:
-          pylance-version: "latest-release"
-          working-directory: "."
           python-version: ${{ matrix.python-version }}
           python-platform: "Linux"
           extra-args: >-
