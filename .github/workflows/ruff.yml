@@ -22,17 +22,11 @@ jobs:
       cancel-in-progress: true
 
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/cache@v4
-        with:
-          path: ~/.cache/ruff
-          key: ${{ runner.os }}-ruff-${{ hashFiles('**/pyproject.toml') }}
-          restore-keys: |
-            ${{ runner.os }}-ruff-
-
-      - name: Run Ruff
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install Ruff Format
         uses: astral-sh/ruff-action@v3
-        with:
-          version: "latest"
-          args: "check --fix"
+      - name: Run Ruff Check
+        run: ruff check
+      - name: Run Ruff Format
+        run: ruff format
