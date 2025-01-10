@@ -38,7 +38,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.python-version != 'all') && [github.event.inputs.python-version] || ['3.9', '3.10', '3.11', '3.12'] }}
+        python-version: ['3.9', '3.10', '3.11', '3.12']
       fail-fast: false
     concurrency:
       group: pyright-${{ github.ref }}-${{ matrix.python-version }}
