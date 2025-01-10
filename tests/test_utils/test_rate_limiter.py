@@ -102,13 +102,10 @@ async def test_window_sliding(mocker: MockerFixture, limiter: RateLimiter) -> No
 
 
 @pytest.mark.asyncio
-async def test_concurrent_requests(limiter: RateLimiter) -> None:
-    """Test concurrent request handling.
+async def test_concurrent_requests():
+    limiter = RateLimiter(calls=3, period=0.5)
 
-    Args:
-        limiter: The rate limiter fixture
-    """
-    semaphore = asyncio.Semaphore(2)  # 限制并发数为2
+    semaphore = asyncio.Semaphore(2)
     active_count = 0
     max_active = 0
 
@@ -121,11 +118,10 @@ async def test_concurrent_requests(limiter: RateLimiter) -> None:
             await asyncio.sleep(0.01)
             active_count -= 1
 
-    # 执行测试
     tasks = [test_func() for _ in range(5)]
     await asyncio.gather(*tasks)
 
-    assert max_active <= 2, f"并发请求数不应超过2，实际为 {max_active}"
+    assert max_active <= 2
 
 
 @pytest.mark.asyncio
