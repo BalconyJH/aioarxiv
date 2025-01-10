@@ -34,5 +34,5 @@ jobs:
       - name: Run Ruff
         uses: astral-sh/ruff-action@v1
         with:
-          version: latest
-          args: --statistics --diff
+          version: "latest"
+          args: "check --fix"
