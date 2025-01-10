@@ -5,9 +5,7 @@ import pytest
 from pytest_mock import MockerFixture
 
 from aioarxiv.client.downloader import ArxivDownloader
-from aioarxiv.models import (
-    Paper,
-)
+from aioarxiv.models import Paper
 
 
 class MockResponse:

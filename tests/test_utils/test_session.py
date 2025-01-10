@@ -4,6 +4,7 @@ from aiohttp import ClientResponse, ClientSession
 import pytest
 
 from aioarxiv.config import ArxivConfig
+from aioarxiv.utils.rate_limiter import RateLimiter
 from aioarxiv.utils.session import SessionManager
 
 
@@ -31,8 +32,6 @@ def mock_response(mocker):
 @pytest.fixture(autouse=True)
 async def _reset_rate_limiter() -> None:
     """重置速率限制器状态"""
-    from aioarxiv.utils.rate_limiter import RateLimiter
-
     RateLimiter.timestamps.clear()
     RateLimiter._calls = 5
     RateLimiter._period = 1.0
@@ -80,9 +79,6 @@ async def test_session_lifecycle(mock_session, mocker) -> None:
 @pytest.mark.asyncio
 async def test_rate_limiting(mocker, mock_response) -> None:
     """测试速率限制"""
-    from aioarxiv.utils.rate_limiter import RateLimiter
-    from aioarxiv.utils.session import SessionManager
-
     RateLimiter.timestamps.clear()
     RateLimiter._calls = 2
     RateLimiter._period = 1.0

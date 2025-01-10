@@ -70,7 +70,7 @@ class RateLimiter:
             wait_time = cls.timestamps[0] + cls._period - now
             if wait_time > 0:
                 logger.debug(
-                    f"触发速率限制, 等待{wait_time:.2f}秒",
+                    f"Rate limit reached, waiting for {wait_time:.2f}s",
                     extra={
                         "wait_time": f"{wait_time:.2f}s",
                         "current_calls": len(cls.timestamps),
@@ -112,7 +112,7 @@ class RateLimiter:
                     cls.timestamps.append(now)
 
                     logger.debug(
-                        "请求通过限制器",
+                        "request rate limit",
                         extra={
                             "current_calls": len(cls.timestamps),
                             "max_calls": cls._calls,

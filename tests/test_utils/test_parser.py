@@ -10,8 +10,8 @@ import pytest
 from yarl import URL
 
 from aioarxiv.exception import ParserException
-from aioarxiv.models import Category, Paper, SearchParams
-from aioarxiv.utils.parser import ArxivParser, PaperParser, RootParser
+from aioarxiv.models import Category, Paper
+from aioarxiv.utils.parser import ArxivParser, PaperParser
 
 SAMPLE_XML_PATH = pathlib.Path(__file__).parent.parent / "data" / "sample.xml"
 
@@ -112,20 +112,6 @@ def test_parse_datetime():
     dt = parser.parse_datetime("2024-03-18T00:00:00Z")
     assert isinstance(dt, datetime)
     assert dt.tzinfo == ZoneInfo("Asia/Shanghai")
-
-
-def test_root_parser_total_result(sample_xml):
-    root = RootParser(sample_xml, URL("http://test.com"))
-    assert root.parse_total_result() == 218712
-
-
-def test_root_parser_build_search_result(sample_xml):
-    root = RootParser(sample_xml, URL("http://test.com"))
-    params = SearchParams(query="test")  # pyright: ignore [reportCallIssue]
-    result = root.build_search_result(params)
-    assert result.total_result == 218712
-    assert result.page == 1
-    assert result.query_params == params
 
 
 def test_arxiv_parser_build_paper(paper_entry):

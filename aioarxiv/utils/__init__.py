@@ -17,10 +17,10 @@ from .log import logger
 
 def create_trace_config() -> aiohttp.TraceConfig:
     """
-    创建请求追踪配置。
+    Create request tracing configuration.
 
     Returns:
-        aiohttp.TraceConfig: 请求追踪配置
+        aiohttp.TraceConfig: Request tracing configuration object.
     """
 
     async def _on_request_start(
@@ -28,6 +28,14 @@ def create_trace_config() -> aiohttp.TraceConfig:
         trace_config_ctx: SimpleNamespace,
         params: aiohttp.TraceRequestStartParams,
     ) -> None:
+        """
+        Callback executed when a request starts.
+
+        Args:
+            session (aiohttp.ClientSession): The client session.
+            trace_config_ctx (SimpleNamespace): Trace configuration context.
+            params (aiohttp.TraceRequestStartParams): Request start parameters.
+        """
         logger.debug(f"Starting request: {params.method} {params.url}")
         trace_config_ctx.start_time = monotonic()
 
@@ -36,6 +44,14 @@ def create_trace_config() -> aiohttp.TraceConfig:
         trace_config_ctx: SimpleNamespace,
         params: aiohttp.TraceRequestEndParams,
     ) -> None:
+        """
+        Callback executed when a request ends.
+
+        Args:
+            session (aiohttp.ClientSession): The client session.
+            trace_config_ctx (SimpleNamespace): Trace configuration context.
+            params (aiohttp.TraceRequestEndParams): Request end parameters.
+        """
         elapsed_time = monotonic() - trace_config_ctx.start_time
         logger.debug(
             f"Ending request: {params.response.status} {params.url} - Time elapsed: "
@@ -56,17 +72,17 @@ def create_parser_exception(
     error: Optional[Exception] = None,
 ) -> ParserException:
     """
-    创建解析异常, 用于解析xml数据时出现错误。
+    Create a parsing exception for XML data parsing errors.
 
     Args:
-        data (ET.Element): 解析失败的数据
-        url (str): 请求url
-        message (Optional[str], optional): 异常消息. Defaults to None.
-        namespace (Optional[str], optional): 命名空间. Defaults to None.
-        error (Optional[Exception], optional): 原始异常. Defaults to None.
+        data (ET.Element): The data that failed to parse.
+        url (Optional[str]): The request URL.
+        message (Optional[str], optional): Exception message. Defaults to None.
+        namespace (Optional[str], optional): XML namespace. Defaults to None.
+        error (Optional[Exception], optional): Original exception. Defaults to None.
 
     Returns:
-        ParserException: 解析异常
+        ParserException: The created parsing exception.
     """
     return ParserException(
         url=url or "",
@@ -86,15 +102,15 @@ def calculate_page_size(
     max_results: Optional[int],
 ) -> int:
     """
-    计算单页大小, 限制在配置的单页大小和最大结果数之间。
+    Calculate page size constrained by configuration page size and maximum results.
 
     Args:
-        config_page_size (int): 配置的单页大小
-        start (int): 起始位置
-        max_results (Optional[int]): 最大结果数
+        config_page_size (int): Configured page size.
+        start (int): Starting position.
+        max_results (Optional[int]): Maximum number of results.
 
     Returns:
-        int: 单页大小
+        int: Calculated page size.
     """
     if max_results is None:
         return config_page_size
@@ -104,13 +120,18 @@ def calculate_page_size(
 
 def format_datetime(dt: datetime) -> str:
     """
-    格式化日期时间。
+    Format datetime to string.
 
     Args:
-        dt (datetime): 日期时间
+        dt (datetime): Datetime object to format.
 
     Returns:
-        str: 格式化后的日期时间, 格式为: %Y-%m-%d_%H-%M-%S_%Z (2024-03-21_15-30-00_CST)
+        str: Formatted datetime string in format: %Y-%m-%d_%H-%M-%S_%Z
+            (e.g., 2024-03-21_15-30-00_CST).
+
+    Examples:
+        >>> format_datetime(datetime(2024, 3, 21, 15, 30, 0))
+        '2024-03-21_15-30-00_CST'
     """
     local_dt = dt.astimezone(ZoneInfo(default_config.timezone))
     return local_dt.strftime("%Y-%m-%d_%H-%M-%S_%Z")
@@ -152,6 +173,17 @@ def sanitize_title(title: str, max_length: int = 50) -> str:
 
 
 def log_retry_attempt(retry_state: RetryCallState) -> None:
+    """
+    Log retry attempt information.
+
+    Args:
+        retry_state (RetryCallState): Current retry state containing attempt
+            information.
+
+    Examples:
+        >>> log_retry_attempt(RetryCallState(attempt_number=2))
+        WARNING:root:retry times: 2/3
+    """
     logger.warning(
         f"retry times: {retry_state.attempt_number}/{default_config.max_retries}"
     )
