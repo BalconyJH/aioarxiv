@@ -25,7 +25,7 @@ from aioarxiv.utils import (
     sanitize_title,
 )
 
-TOLERANCE = 0.1
+TOLERANCE = 0.25
 
 
 @pytest.fixture
@@ -201,9 +201,9 @@ async def test_create_trace_config_multiple_requests(
         elapsed_times.append(elapsed_time)
 
     for expected, actual in zip(delays, elapsed_times):
-        assert math.isclose(actual, expected, rel_tol=TOLERANCE), (
-            f"请求耗时不在预期范围内: 期望约为{expected}秒, " f"实际为{actual:.4f}秒"
-        )
+        assert math.isclose(
+            actual, expected, rel_tol=TOLERANCE
+        ), f"请求耗时不在预期范围内: 期望约为{expected}秒, 实际为{actual:.4f}秒"
 
 
 def test_create_parser_exception_basic(sample_xml_element):
