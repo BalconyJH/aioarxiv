@@ -50,7 +50,7 @@ runs:
       run: |
         cd ${{ inputs.env-dir }}
         
-        install_cmd="pdm install"
+        install_cmd="pdm install -g"
         
         if [ ! -z "${{ inputs.with-groups }}" ]; then
           IFS=',' read -ra groups <<< "${{ inputs.with-groups }}"
@@ -64,7 +64,7 @@ runs:
         fi
         
         if [ "${{ inputs.dev }}" = "true" ]; then
-          install_cmd="$install_cmd --dev"
+          install_cmd="$install_cmd -d"
         fi
         
         if [ "${{ inputs.production }}" = "true" ]; then
@@ -72,7 +72,7 @@ runs:
         fi
         
         if [ "${{ inputs.no-root }}" = "true" ]; then
-          install_cmd="$install_cmd --no-default"
+          install_cmd="$install_cmd --no-self"
         fi
         
         echo "Running: $install_cmd"
