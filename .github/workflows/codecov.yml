@@ -1,54 +1,77 @@
-#name: Code Coverage
-#
-#on:
-#  push:
-#    branches:
-#      - main
-#  pull_request:
-#    paths:
-#      - "envs/**"
-#      - "aioarxiv/**"
-#      - "tests/**"
-#      - ".github/workflows/codecov.yml"
-#      - "pyproject.toml"
-#      - "pdm.lock"
-#
-#jobs:
-#  test:
-#    name: Test Coverage
-#    runs-on: ${{ matrix.os }}
-#    concurrency:
-#      group: test-coverage-${{ github.ref }}-${{ matrix.os }}-${{ matrix.python-version }}-${{ matrix.env }}
-#      cancel-in-progress: true
-#    strategy:
-#      fail-fast: false
-#      matrix:
-#        python-version: ["3.9", "3.10", "3.11", "3.12"]
-#        os: [ubuntu-latest, windows-latest, macos-latest]
-#    env:
-#      OS: ${{ matrix.os }}
-#      PYTHON_VERSION: ${{ matrix.python-version }}
-#
-#    steps:
-#      - uses: actions/checkout@v4
-#
-#      - name: Setup Python environment
-#        uses: ./.github/actions/setup-python
-#        with:
-#          python-version: ${{ matrix.python-version }}
-#          env-dir: ./envs/${{ matrix.env }}
-#          no-root: true
-#
-#      - name: Run Pytest
-#        run: |
-#          cd ./envs/${{ matrix.env }}
-#          poetry run bash "../../scripts/run-tests.sh"
-#
-#      - name: Upload coverage report
-#        uses: codecov/codecov-action@v4
-#        with:
-#          env_vars: OS,PYTHON_VERSION,PYDANTIC_VERSION
-#          files: ./tests/coverage.xml
-#          flags: unittests
-#        env:
-#          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+name: Code Coverage
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    paths:
+      - "envs/**"
+      - "aioarxiv/**"
+      - "tests/**"
+      - ".github/workflows/codecov.yml"
+      - "pyproject.toml"
+      - "pdm.lock"
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: Test Coverage
+    runs-on: ${{ matrix.os }}
+    concurrency:
+      group: test-coverage-${{ github.ref }}-${{ matrix.os }}-${{ matrix.python-version }}
+      cancel-in-progress: true
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.10", "3.11", "3.12"]
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    env:
+      OS: ${{ matrix.os }}
+      PYTHON_VERSION: ${{ matrix.python-version }}
+      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Setup Python environment
+        uses: ./.github/actions/setup-python
+        with:
+          python-version: ${{ matrix.python-version }}
+          with-groups: "test"
+          no-root: "false"
+
+      - name: Run Tests with Coverage
+        shell: bash
+        run: |
+          pdm run pytest tests/ \
+            --cov=aioarxiv \
+            --cov-report=xml:coverage.xml \
+            --cov-report=term \
+            --cov-report=html:coverage_html \
+            --junitxml=pytest.xml \
+            -v
+
+      - name: Upload coverage reports to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          slug: BalconyJH/aioarxiv
+          directory: ./
+          env_vars: OS,PYTHON_VERSION
+          files: ./coverage.xml,./pytest.xml
+          flags: pytest-${{ matrix.python-version }}-${{ matrix.os }}
+          name: codecov-umbrella
+          fail_ci_if_error: true
+          verbose: true
+
+      - name: Upload coverage html report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-html-${{ matrix.python-version }}-${{ matrix.os }}
+          path: coverage_html/
+          retention-days: 14
