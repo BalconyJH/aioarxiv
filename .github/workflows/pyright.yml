@@ -16,7 +16,7 @@ on:
   workflow_dispatch:
     inputs:
       python-version:
-        description: 'Python version to test'
+        description: 'Python version'
         required: false
         type: choice
         options:
@@ -27,7 +27,7 @@ on:
           - '3.12'
         default: 'all'
       debug-mode:
-        description: 'Enable debug mode'
+        description: 'enable debug mode'
         required: false
         type: boolean
         default: false
@@ -47,18 +47,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Python environment
+      - name: Setup Python
         uses: ./.github/actions/setup-python
         with:
           python-version: ${{ matrix.python-version }}
           with-groups: "test,dev"
           no-root: "false"
+          env-dir: "."
 
       - name: Run Pyright
         uses: jakebailey/pyright-action@v2
         with:
           pylance-version: "latest-release"
-          use-config: true
           working-directory: "."
-          extra-args: ${{ github.event.inputs.debug-mode == 'true' && '--warnings --verbose --level verbose' || '--warnings --verbose' }}
+          python-version: ${{ matrix.python-version }}
+          python-platform: "Linux"
+          extra-args: >-
+            ${{ github.event.inputs.debug-mode == 'true' && '--warnings --verbose --level verbose' || '--warnings --verbose' }}
           annotate: true
