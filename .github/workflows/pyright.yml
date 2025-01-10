@@ -18,8 +18,12 @@ jobs:
   pyright:
     name: Pyright Lint
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: [ "3.9", "3.10", "3.11", "3.12" ]
+      fail-fast: false
     concurrency:
-      group: pyright-${{ github.ref }}-${{ matrix.env }}
+      group: pyright-${{ github.ref }}-${{ matrix.python-version }}
       cancel-in-progress: true
 
     steps:
@@ -28,8 +32,15 @@ jobs:
       - name: Setup Python environment
         uses: ./.github/actions/setup-python
         with:
-          env-dir: ./envs/${{ matrix.env }}
-          no-root: true
+          python-version: ${{ matrix.python-version }}
+          with-groups: "test,dev"
+          no-root: "false"
 
       - name: Run Pyright
         uses: jakebailey/pyright-action@v2
+        with:
+          pylance-version: "latest-release"
+          use-config: true
+          working-directory: "."
+          extra-args: "--warnings --verbose"
+          annotate: true

@@ -1,11 +1,11 @@
 name: Setup Python
-description: Setup Python
+description: Setup Python with PDM
 
 inputs:
   python-version:
-    description: Python version
+    description: Python version to use
     required: false
-    default: "3.10"
+    default: "3.9"
   env-dir:
     description: Environment directory
     required: false
@@ -14,24 +14,71 @@ inputs:
     description: Do not install package in the environment
     required: false
     default: "false"
+  pdm-version:
+    description: PDM version to use
+    required: false
+    default: "latest"
+  allow-python-prereleases:
+    description: Allow installing python prereleases
+    required: false
+    default: "false"
+  with-groups:
+    description: Comma-separated list of dependency groups to include (e.g., "dev,test")
+    required: false
+    default: ""
+  without-groups:
+    description: Comma-separated list of dependency groups to exclude
+    required: false
+    default: ""
+  dev:
+    description: Select dev dependencies
+    required: false
+    default: "false"
+  production:
+    description: Unselect dev dependencies
+    required: false
+    default: "false"
 
 runs:
   using: "composite"
   steps:
-    - name: Install pdm
-      run: pipx install pdm
-      shell: bash
-
-    - uses: actions/setup-python@v5
+    - name: Setup PDM
+      uses: pdm-project/setup-pdm@v4
       with:
         python-version: ${{ inputs.python-version }}
-        cache: "pdm"
-        cache-dependency-path: |
-          ./pdm.lock
-          ${{ inputs.env-dir }}/pdm.lock
+        version: ${{ inputs.pdm-version }}
+        allow-python-prereleases: ${{ inputs.allow-python-prereleases }}
+        cache: true
 
-    - run: |
-        cd ${{ inputs.env-dir }}
-          pdm install --all
-        fi
+    - name: Install dependencies
       shell: bash
+      run: |
+        cd ${{ inputs.env-dir }}
+        
+        install_cmd="pdm install"
+        
+        if [ ! -z "${{ inputs.with-groups }}" ]; then
+          IFS=',' read -ra groups <<< "${{ inputs.with-groups }}"
+          for group in "${groups[@]}"; do
+            install_cmd="$install_cmd -G $group"
+          done
+        fi
+        
+        if [ ! -z "${{ inputs.without-groups }}" ]; then
+          install_cmd="$install_cmd --without ${{ inputs.without-groups }}"
+        fi
+        
+        if [ "${{ inputs.dev }}" = "true" ]; then
+          install_cmd="$install_cmd --dev"
+        fi
+        
+        if [ "${{ inputs.production }}" = "true" ]; then
+          install_cmd="$install_cmd --prod"
+        fi
+        
+        if [ "${{ inputs.no-root }}" = "true" ]; then
+          install_cmd="$install_cmd --no-default"
+        fi
+        
+        echo "Running: $install_cmd"
+        eval $install_cmd
