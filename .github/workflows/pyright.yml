@@ -13,6 +13,24 @@ on:
       - ".github/workflows/pyright.yml"
       - "pyproject.toml"
       - "pdm.lock"
+  workflow_dispatch:
+    inputs:
+      python-version:
+        description: 'Python version to test'
+        required: false
+        type: choice
+        options:
+          - 'all'
+          - '3.9'
+          - '3.10'
+          - '3.11'
+          - '3.12'
+        default: 'all'
+      debug-mode:
+        description: 'Enable debug mode'
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   pyright:
@@ -20,7 +38,11 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: [ "3.9", "3.10", "3.11", "3.12" ]
+        python-version: ${{
+          (github.event_name == 'workflow_dispatch' && github.event.inputs.python-version != 'all')
+          && [github.event.inputs.python-version]
+          || ['3.9', '3.10', '3.11', '3.12']
+      }}
       fail-fast: false
     concurrency:
       group: pyright-${{ github.ref }}-${{ matrix.python-version }}
@@ -42,5 +64,5 @@ jobs:
           pylance-version: "latest-release"
           use-config: true
           working-directory: "."
-          extra-args: "--warnings --verbose"
+          extra-args: ${{ github.event.inputs.debug-mode == 'true' && '--warnings --verbose --level verbose' || '--warnings --verbose' }}
           annotate: true
