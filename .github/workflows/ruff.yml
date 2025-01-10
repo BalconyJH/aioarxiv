@@ -32,7 +32,7 @@ jobs:
             ${{ runner.os }}-ruff-
 
       - name: Run Ruff
-        uses: astral-sh/ruff-action@v1
+        uses: astral-sh/ruff-action@v3
         with:
           version: "latest"
           args: "check --fix"
