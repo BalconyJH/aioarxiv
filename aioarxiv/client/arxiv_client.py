@@ -165,7 +165,6 @@ class ArxivClient:
         result = ArxivParser(await response.text(), response).build_search_result(
             params
         )
-        logger.debug(f"Fetched page {page} with {len(result.papers)} papers")
         return self._build_search_result_metadata(
             searchresult=result,
             page=page,
@@ -545,7 +544,7 @@ class ArxivClient:
 
         logger.debug(
             f"Aggregated {len(results)} search results with {len(merged_papers)} "
-            f"unique papers."
+            f"papers in {aggregated_result.metadata.duration_seconds} seconds"
         )
 
         return aggregated_result
