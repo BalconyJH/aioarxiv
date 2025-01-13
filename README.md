@@ -36,7 +36,7 @@ pip install aioarxiv
 * Python 3.9 or higher
 
 ## License
-[MIT License (c) 2024 BalconyJH ](LICENSE)
+[MIT License (c) 2025 BalconyJH ](LICENSE)
 
 ## Links
 * Documentation for aioarxiv is WIP

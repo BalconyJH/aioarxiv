@@ -34,7 +34,8 @@ at this time:
 
 | **Version** | **Build**    | **Release Date** | **Status** | **Notes**             |
 |-------------|--------------|------------------|------------|-----------------------|
-| 0.1.2       | PyPI Release | 15/11/2024       | Latest     | Initial testing phase |
+| 0.2.0       | PyPI Release | 13/1/2025        | Latest     | Initial testing phase |
+| 0.1.2       | PyPI Release | 15/11/2024       | Old        | Initial testing phase |
 
 ## System requirements
 

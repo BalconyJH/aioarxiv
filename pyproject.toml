@@ -30,6 +30,7 @@ line-length = 88
 target-version = "py39"
 
 [tool.ruff.lint]
+exclude = ["typings/*/"]
 select = [
     "F",     # Pyflakes
     "W",     # pycodestyle warnings
@@ -37,28 +38,34 @@ select = [
     "I",     # isort
     "UP",    # pyupgrade
     "ASYNC", # flake8-async
+    "B",     # flake8-bugbear
     "C4",    # flake8-comprehensions
+    "DTZ",   # flake8-datetimez
     "T10",   # flake8-debugger
     "T20",   # flake8-print
     "PYI",   # flake8-pyi
     "PT",    # flake8-pytest-style
     "Q",     # flake8-quotes
-    "TID",   # flake8-tidy-imports
-    "RUF",   # Ruff-specific rules
-    "DTZ",   # flake8-datetimez
     "SIM",   # flake8-simplify
-    "ISC",   # flake8-implicit-str-concat
+    "TID",   # flake8-tidy-imports
+    "PLE",   # Pylint errors
+    "NPY",   # NumPy-specific rules
+    "RUF",   # Ruff-specific rules
 ]
 ignore = [
     "E402",   # module-import-not-at-top-of-file
-    "UP037",  # quoted-annotation
+    "B008",   # function-call-in-default-argument
     "RUF001", # ambiguous-unicode-character-string
     "RUF002", # ambiguous-unicode-character-docstring
     "RUF003", # ambiguous-unicode-character-comment
     "ISC001"  # single-line-implicit-string-concatenation
 ]
 
+[tool.ruff.format]
+line-ending = "lf"
+
 [tool.ruff.lint.isort]
+length-sort = false
 force-sort-within-sections = true
 known-first-party = ["aioarxiv", "tests/*"]
 extra-standard-library = ["typing_extensions"]
