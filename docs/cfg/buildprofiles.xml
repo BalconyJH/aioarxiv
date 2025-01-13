@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE buildprofiles SYSTEM "https://resources.jetbrains.com/writerside/1.0/build-profiles.dtd">
+<buildprofiles xsi:noNamespaceSchemaLocation="https://resources.jetbrains.com/writerside/1.0/build-profiles.xsd"
+               xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+
+    <build-profile instance="a">
+        <variables>
+            <noindex-content>true</noindex-content>
+        </variables>
+    </build-profile>
+
+    <footer>
+        <copyright>2025 BalconyJH</copyright>
+<!--        <social type="twitter" href="https://twitter.com/onwriterside"/>-->
+        <link href="https://github.com/BalconyJH">Github</link>
+        <link href="https://github.com/BalconyJH/aioarxiv/blob/main/LICENSE">MIT LICENSE</link>
+    </footer>
+    <variables>
+        <download-title>Github</download-title>
+        <download-page>https://github.com/BalconyJH/aioarxiv</download-page>
+        <showDownloadButton>true</showDownloadButton>
+        <webmaster>https://github.com/BalconyJH</webmaster>
+    </variables>
+
+</buildprofiles>

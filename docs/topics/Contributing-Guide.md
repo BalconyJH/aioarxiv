@@ -1,0 +1,3 @@
+# Contributing Guide
+
+Start typing here...
