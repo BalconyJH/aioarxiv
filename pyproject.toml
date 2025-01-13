@@ -6,7 +6,6 @@ authors = [
     { name = "BalconyJH", email = "balconyjh@gmail.com" },
 ]
 dependencies = [
-    "feedparser~=6.0",
     "loguru~=0.7",
     "pydantic>=2.9.2",
     "aiohttp>=3.10.10",
@@ -99,7 +98,6 @@ dev = [
     "ruff>=0.8",
     "pre-commit~=4.0",
     "bump-my-version>=0.28.1",
-    "mkdocs-material>=9.5.49",
 ]
 
 [tool.coverage.run]
