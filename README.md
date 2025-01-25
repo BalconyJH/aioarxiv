@@ -1,12 +1,16 @@
 # Aioarxiv
 
+An async Python client for the arXiv API with enhanced performance and flexible configuration options.
+
 <a href="https://raw.githubusercontent.com/BalconyJH/aioarxiv/main/LICENSE">
     <img src="https://img.shields.io/github/license/BalconyJH/aioarxiv" alt="license">
 </a>
 <a href="https://pypi.org/project/aioarxiv/">
     <img src="https://img.shields.io/pypi/v/aioarxiv?logo=python&logoColor=edb641" alt="pypi">
 </a>
-<img src="https://img.shields.io/badge/python-3.9+-blue?logo=python&logoColor=edb641" alt="python">
+<a href="https://www.python.org/downloads/release/python-390">
+    <img src="https://img.shields.io/badge/python-3.9+-blue?logo=python&logoColor=edb641" alt="python">
+</a>
 <a href="https://codecov.io/gh/BalconyJH/aioarxiv">
     <img src="https://img.shields.io/codecov/c/github/BalconyJH/aioarxiv" alt="codecov">
 </a>
@@ -31,8 +35,6 @@
 <a href="https://pypi.org/project/aioarxiv/">
     <img src="https://img.shields.io/pypi/dm/aioarxiv" alt="pypi">
 </a>
-
-An async Python client for the arXiv API with enhanced performance and flexible configuration options.
 
 > [!WARNING]
 > This project is currently under development and has not yet reached a stable release. We do not recommend using it in
