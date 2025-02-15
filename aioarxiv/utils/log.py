@@ -1,6 +1,5 @@
 import inspect
 import logging
-import sys
 from typing import TYPE_CHECKING, Optional
 
 import loguru
@@ -83,14 +82,14 @@ default_format: str = (
 )
 """默认日志格式"""
 
-logger.remove()
-logger_id = logger.add(
-    sys.stdout,
-    level=0,
-    diagnose=False,
-    filter=default_filter,
-    format=default_format,
-)
-"""默认日志处理器 id"""
+# logger.remove()
+# logger_id = logger.add(
+#     sys.stdout,
+#     level=0,
+#     diagnose=False,
+#     filter=default_filter,
+#     format=default_format,
+# )
+# """默认日志处理器 id"""
 
 __autodoc__ = {"logger_id": False}
