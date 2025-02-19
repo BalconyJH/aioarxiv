@@ -1,6 +1,5 @@
 import inspect
 import logging
-import sys
 from typing import TYPE_CHECKING, Optional
 
 import loguru
@@ -13,37 +12,39 @@ if TYPE_CHECKING:
     from loguru import Logger, Record
 
 logger: "Logger" = loguru.logger
-"""日志记录器对象。
+"""loguru logger instance
 
 default:
 
-- 格式: `[%(asctime)s %(name)s] %(levelname)s: %(message)s`
-- 等级: `INFO` ,  根据 `config.log_level` 配置改变
-- 输出: 输出至 stdout
+- format: `<g>{time:MM-DD HH:mm:ss}</g> [<lvl>{level}</lvl>] <c><u>{name}</u></c> | <c>{function}:{line}</c>| {message}`
+- level: `INFO` , depends on `config.log_level` configuration
+- output: stdout
 
 usage:
     ```python
     from log import logger
     ```
-"""
+"""  # noqa: E501
 
 _current_config: Optional[ArxivConfig] = None
 
 
 def set_config(config: ArxivConfig) -> None:
-    """设置当前全局配置"""
+    """set current global config"""
     global _current_config
     _current_config = config
 
 
 def get_config() -> ArxivConfig:
-    """获取当前配置或默认配置"""
+    """get current config or default config"""
     return _current_config or default_config
 
 
 # https://loguru.readthedocs.io/en/stable/overview.html#entirely-compatible-with-standard-logging
 class LoguruHandler(logging.Handler):  # pragma: no cover
-    """logging 与 loguru 之间的桥梁,  将 logging 的日志转发到 loguru。"""
+    """
+    A handler class which allows the use of Loguru in Python's standard logging module.
+    """
 
     def emit(self, record: logging.LogRecord) -> None:
         try:
@@ -63,7 +64,7 @@ class LoguruHandler(logging.Handler):  # pragma: no cover
 
 
 def default_filter(record: "Record"):
-    """默认的日志过滤器,  根据 `config.log_level` 配置改变日志等级。"""
+    """default loguru filter function, change log level by config.log_level"""
     log_level = record["extra"].get("arxiv_log_level")
 
     if log_level is None:
@@ -81,16 +82,14 @@ default_format: str = (
     "<c>{function}:{line}</c>| "
     "{message}"
 )
-"""默认日志格式"""
 
-logger.remove()
-logger_id = logger.add(
-    sys.stdout,
-    level=0,
-    diagnose=False,
-    filter=default_filter,
-    format=default_format,
-)
-"""默认日志处理器 id"""
+# logger.remove()
+# logger_id = logger.add(
+#     sys.stdout,
+#     level=0,
+#     diagnose=False,
+#     filter=default_filter,
+#     format=default_format,
+# )
 
 __autodoc__ = {"logger_id": False}
