@@ -3,6 +3,7 @@ from datetime import datetime
 from pathlib import Path
 from types import TracebackType
 from typing import Optional
+from typing_extensions import overload
 from zoneinfo import ZoneInfo
 
 from aiohttp import ClientResponse
@@ -100,17 +101,18 @@ class ArxivClient:
 
     async def _prepare_initial_search(
         self,
-        query: str,
-        start: Optional[int],
-        id_list: Optional[list[str]],
-        max_results: Optional[int],
-        sort_by: Optional[SortCriterion],
-        sort_order: Optional[SortOrder],
+        query: Optional[str] = None,
+        start: Optional[int] = None,
+        id_list: Optional[list[str]] = None,
+        max_results: Optional[int] = None,
+        sort_by: Optional[SortCriterion] = None,
+        sort_order: Optional[SortOrder] = None,
     ) -> tuple[SearchResult, bool]:
-        """Prepare the initial search request and fetch the first page of results.
+        """
+        Prepare the initial search request and fetch the first page of results.
 
         Args:
-            query (str): The search query string.
+            query (Optional[str]): The search query string.
             start (Optional[int]): Index of first result to retrieve.
             id_list (Optional[list[str]]): List of arXiv IDs to retrieve.
             max_results (Optional[int]): Maximum number of results to return.
@@ -119,30 +121,44 @@ class ArxivClient:
 
         Returns:
             tuple[SearchResult, bool]: Tuple containing search result and flag
-                indicating whether more results need to be fetched.
+            indicating whether more results need to be fetched.
         """
+        if not query and not id_list:
+            raise ValueError("Must provide either query or id_list")
+
+        if query and id_list:
+            raise ValueError("Cannot use both query and id_list")
+
+        is_id_query = bool(id_list)
         page_size = min(self._config.page_size, max_results or self._config.page_size)
 
         params = SearchParams(
-            query=query,
+            query=None if is_id_query else query,
+            id_list=id_list if is_id_query else None,
             start=start,
-            id_list=id_list,
             max_results=page_size,
-            sort_by=sort_by,
-            sort_order=sort_order,
+            sort_by=None if is_id_query else sort_by,
+            sort_order=None if is_id_query else sort_order,
         )
 
         response = await self._fetch_page(params)
+
         result = ArxivParser(await response.text(), response).build_search_result(
             params
         )
+
         logger.debug(f"Fetched page 1 with {len(result.papers)} papers")
+
         result = self._build_search_result_metadata(
-            searchresult=result, page=1, batch_size=page_size, papers=result.papers
+            searchresult=result,
+            page=1,
+            batch_size=page_size,
+            papers=result.papers,
         )
 
         needs_more = (
-            max_results is not None
+            not is_id_query
+            and max_results is not None
             and max_results > len(result.papers)
             and result.total_result > len(result.papers)
         )
@@ -207,87 +223,134 @@ class ArxivClient:
             for i, param in enumerate(page_params)
         ]
 
+    @overload
     async def search(
         self,
         query: str,
+        id_list: None = ...,
+        max_results: Optional[int] = ...,
+        sort_by: Optional[SortCriterion] = ...,
+        sort_order: Optional[SortOrder] = ...,
+        start: Optional[int] = ...,
+    ) -> SearchResult: ...
+
+    @overload
+    async def search(
+        self,
+        query: None = ...,
+        id_list: list[str] = ...,
+        max_results: Optional[int] = ...,
+        sort_by: Optional[SortCriterion] = ...,
+        sort_order: Optional[SortOrder] = ...,
+        start: Optional[int] = ...,
+    ) -> SearchResult: ...
+
+    async def search(
+        self,
+        query: Optional[str] = None,
         id_list: Optional[list[str]] = None,
         max_results: Optional[int] = None,
         sort_by: Optional[SortCriterion] = None,
         sort_order: Optional[SortOrder] = None,
         start: Optional[int] = None,
     ) -> SearchResult:
-        """Search arXiv papers based on given parameters.
+        """
+        Search arXiv papers via either a keyword query or arXiv ID list.
 
         Args:
-            query (str): The search query string.
-            id_list (Optional[list[str]], optional): List of arXiv IDs to retrieve.
-                Defaults to None.
-            max_results (Optional[int], optional): Maximum number of results to return.
-                Defaults to None (uses config default).
-            sort_by (Optional[SortCriterion], optional): Criterion to sort results by.
-                Defaults to None.
-            sort_order (Optional[SortOrder], optional): Order of sorting. Defaults to
-                None.
-            start (Optional[int], optional): Index of first result to retrieve.
-                Defaults to None (starts from beginning).
+            query (Optional[str]): Keyword-based query string.
+            id_list (Optional[list[str]]): List of arXiv IDs to retrieve.
+            max_results (Optional[int]): Max results for query search.
+            sort_by (Optional[SortCriterion]): Sorting criterion for query search.
+            sort_order (Optional[SortOrder]): Sorting order for query search.
+            start (Optional[int]): Start index.
 
         Returns:
-            SearchResult: Object containing search results and metadata.
-
-        Raises:
-            HTTPException: If the API request fails.
-            QueryBuildError: If there's an error building the search query.
+            SearchResult: Search results object.
         """
+        if not query and not id_list:
+            raise ValueError("必须提供 query 或 id_list 中的一个")
+        if query and id_list:
+            raise ValueError("query 和 id_list 不能同时使用")
+
         try:
-            # Get initial search results
-            first_page_result, should_fetch_more = await self._prepare_initial_search(
-                query=query,
-                start=start,
-                id_list=id_list,
-                max_results=max_results,
-                sort_by=sort_by,
-                sort_order=sort_order,
+            if query:
+                return await self._search_by_query(
+                    query=query,
+                    max_results=max_results,
+                    sort_by=sort_by,
+                    sort_order=sort_order,
+                    start=start,
+                )
+            elif id_list:
+                return await self._search_by_ids(
+                    id_list=id_list,
+                    start=start,
+                )
+            raise QueryBuildError(
+                "Search query build failed",
             )
-
-            if not should_fetch_more:
-                return first_page_result
-
-            # Calculate pagination parameters
-            papers_received = len(first_page_result.papers)
-            remaining_papers = min(
-                (max_results - papers_received)
-                if max_results
-                else first_page_result.total_result,
-                first_page_result.total_result - papers_received,
-            )
-
-            if remaining_papers <= 0:
-                return first_page_result
-
-            # Prepare batch requests parameters
-            page_params = self._generate_page_params(
-                base_start=(start or 0) + self._config.page_size,
-                remaining_papers=remaining_papers,
-                page_size=self._config.page_size,
-            )
-
-            logger.debug(f"Fetching {len(page_params)} additional pages")
-
-            # Execute batch requests
-            additional_results = await self._fetch_batch_results(
-                query=query,
-                page_params=page_params,
-                sort_by=sort_by,
-                sort_order=sort_order,
-            )
-
-            return self.aggregate_search_results(
-                [first_page_result, *additional_results]
-            )
-
         except Exception as e:
             logger.error(f"Search operation failed: {e!s}", exc_info=True)
             raise
+
+    async def _search_by_query(
+        self,
+        query: str,
+        max_results: Optional[int] = None,
+        sort_by: Optional[SortCriterion] = None,
+        sort_order: Optional[SortOrder] = None,
+        start: Optional[int] = None,
+    ) -> SearchResult:
+        first_page_result, should_fetch_more = await self._prepare_initial_search(
+            query=query,
+            start=start,
+            max_results=max_results,
+            sort_by=sort_by,
+            sort_order=sort_order,
+        )
+
+        if not should_fetch_more:
+            return first_page_result
+
+        papers_received = len(first_page_result.papers)
+        remaining_papers = min(
+            (max_results - papers_received)
+            if max_results
+            else first_page_result.total_result,
+            first_page_result.total_result - papers_received,
+        )
+
+        if remaining_papers <= 0:
+            return first_page_result
+
+        page_params = self._generate_page_params(
+            base_start=(start or 0) + self._config.page_size,
+            remaining_papers=remaining_papers,
+            page_size=self._config.page_size,
+        )
+
+        logger.debug(f"Fetching {len(page_params)} additional pages")
+
+        additional_results = await self._fetch_batch_results(
+            query=query,
+            page_params=page_params,
+            sort_by=sort_by,
+            sort_order=sort_order,
+        )
+
+        return self.aggregate_search_results([first_page_result, *additional_results])
+
+    async def _search_by_ids(
+        self,
+        id_list: list[str],
+        start: Optional[int] = None,
+    ) -> SearchResult:
+        result, _ = await self._prepare_initial_search(
+            id_list=id_list,
+            start=start,
+        )
+        return result
 
     async def _fetch_page(self, params: SearchParams) -> ClientResponse:
         """Fetch a single page of results from arXiv API.
@@ -386,19 +449,23 @@ class ArxivClient:
             QueryBuildError: If there's an error building the search query.
         """
         try:
-            query_params = {
-                "search_query": params.query,
-                "start": params.start or 0,
-                "max_results": params.max_results,
-            }
+            query_params: dict[str, str] = {}
+
+            if params.query is not None:
+                query_params["search_query"] = params.query
+
+            query_params["start"] = str(params.start or 0)
+
+            if params.max_results is not None:
+                query_params["max_results"] = str(params.max_results)
 
             if params.id_list:
                 query_params["id_list"] = ",".join(params.id_list)
 
-            if params.sort_by:
+            if params.sort_by is not None:
                 query_params["sortBy"] = params.sort_by.value
 
-            if params.sort_order:
+            if params.sort_order is not None:
                 query_params["sortOrder"] = params.sort_order.value
 
             return query_params
@@ -412,6 +479,7 @@ class ArxivClient:
                         "max_results": params.max_results,
                         "start": params.start,
                         "id_list": params.id_list,
+                        "query": params.query,
                     },
                     field_name="query_params",
                 ),

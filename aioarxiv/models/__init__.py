@@ -94,7 +94,7 @@ class Paper(BaseModel):
 class SearchParams(BaseModel):
     """搜索参数"""
 
-    query: str = Field(description="搜索关键词")
+    query: Optional[str] = Field(None, description="搜索关键词")
     id_list: Optional[list[str]] = Field(None, description="需要精确搜索的ID列表")
     start: Optional[int] = Field(default=0, ge=0, description="起始索引")
     max_results: Optional[int] = Field(default=10, gt=0, description="最大返回结果数")

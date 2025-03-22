@@ -7,8 +7,12 @@ import pytest
 from yarl import URL
 
 from aioarxiv.client.arxiv_client import ArxivClient
+from aioarxiv.exception import QueryBuildError
 from aioarxiv.models import (
     Metadata,
+    SearchResult,
+    SortCriterion,
+    SortOrder,
 )
 
 
@@ -76,52 +80,70 @@ async def test_metadata_duration_calculation(mock_datetime):
     assert metadata.duration_ms == 1000.000
 
 
-# @pytest.mark.asyncio
-# async def test_search_with_params(
-#     mock_arxiv_client, mock_response, mock_session_manager, mock_config
-# ):
-#     """测试带参数的搜索"""
-#     mock_session_manager.request.return_value = mock_response
-#
-#     params = {
-#         "query": "neural networks",
-#         "max_results": 5,
-#         "sort_by": SortCriterion.SUBMITTED,
-#         "sort_order": SortOrder.ASCENDING,
-#     }
-#
-#     result = await mock_arxiv_client.search(**params)
-#
-#     assert result.total_result == 218712
-#
-#     paper = result.papers[0]
-#     assert paper.info.id == "0102536v1"
-#     assert (
-#         paper.info.title
-#         == "Impact of Electron-Electron Cusp on Configuration Interaction Energies"
-#     )
-#
-#     authors = paper.info.authors
-#     assert len(authors) == 5
-#     assert authors[0].name == "David Prendergast"
-#     assert authors[0].affiliation == "Department of Physics"
-#     assert authors[1].name == "M. Nolan"
-#     assert authors[1].affiliation == "NMRC, University College, Cork, Ireland"
-#
-#     assert paper.doi == "10.1063/1.1383585"
-#     assert paper.journal_ref == "J. Chem. Phys. 115, 1626 (2001)"
-#     assert "11 pages, 6 figures, 3 tables" in paper.comment
-#     assert paper.info.categories.primary.term == "cond-mat.str-el"
-#
-#     call_args = mock_session_manager.request.call_args
-#     assert call_args is not None
-#     _, kwargs = call_args
-#
-#     query_params = kwargs["params"]
-#     assert query_params["search_query"] == "neural networks"
-#     assert query_params["max_results"] == mock_config.page_size
-#     assert query_params["sortBy"] == SortCriterion.SUBMITTED.value
-#     assert query_params["sortOrder"] == SortOrder.ASCENDING.value
+@pytest.mark.asyncio
+async def test_search_with_query(mock_arxiv_client, mocker, sample_search_result):
+    """Test search with query string"""
+    search_by_query = mocker.patch.object(
+        mock_arxiv_client, "_search_by_query", return_value=sample_search_result
+    )
+
+    result = await mock_arxiv_client.search(
+        query="physics",
+        max_results=10,
+        sort_by=SortCriterion.SUBMITTED,
+        sort_order=SortOrder.ASCENDING,
+        start=0,
+    )
+
+    assert isinstance(result, SearchResult)
+    assert search_by_query.call_args.kwargs == {
+        "query": "physics",
+        "max_results": 10,
+        "sort_by": SortCriterion.SUBMITTED,
+        "sort_order": SortOrder.ASCENDING,
+        "start": 0,
+    }
+
+
+@pytest.mark.asyncio
+async def test_search_with_id_list(mock_arxiv_client, mocker, sample_search_result):
+    """Test search with arXiv ID list"""
+    search_by_ids = mocker.patch.object(
+        mock_arxiv_client, "_search_by_ids", return_value=sample_search_result
+    )
+    id_list = ["2101.00123", "2101.00124"]
+
+    result = await mock_arxiv_client.search(id_list=id_list, start=0)
+
+    assert isinstance(result, SearchResult)
+    assert search_by_ids.call_args.kwargs == {"id_list": id_list, "start": 0}
+
+
+@pytest.mark.asyncio
+async def test_search_no_parameters(mock_arxiv_client):
+    """Test search with no parameters raises ValueError"""
+    with pytest.raises(ValueError, match="必须提供 query 或 id_list 中的一个"):
+        await mock_arxiv_client.search()
+
+
+@pytest.mark.asyncio
+async def test_search_both_query_and_id_list(mock_arxiv_client):
+    """Test search with both query and id_list raises ValueError"""
+    with pytest.raises(ValueError, match="query 和 id_list 不能同时使用"):
+        await mock_arxiv_client.search(query="physics", id_list=["2101.00123"])
+
+
+@pytest.mark.asyncio
+async def test_search_error_handling(mock_arxiv_client, mocker):
+    """Test search error handling"""
+    mock_arxiv_client._search_by_query = mocker.patch.object(
+        mock_arxiv_client,
+        "_search_by_query",
+        side_effect=QueryBuildError("Search query build failed"),
+    )
+
+    with pytest.raises(QueryBuildError):
+        await mock_arxiv_client.search(query="physics")
 
 
 def test_search_result_computed_fields(sample_search_result):
