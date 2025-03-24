@@ -11,7 +11,7 @@ from yarl import URL
 
 from aioarxiv.exception import ParserException
 from aioarxiv.models import Category, Paper
-from aioarxiv.utils.parser import ArxivParser, PaperParser
+from aioarxiv.utils.arxiv_parser import ArxivParser, PaperParser
 
 SAMPLE_XML_PATH = pathlib.Path(__file__).parent.parent / "data" / "sample.xml"
 
@@ -31,7 +31,7 @@ def mock_response(mocker, sample_xml):
 
 @pytest.fixture
 def paper_entry(sample_xml):
-    root = ET.fromstring(sample_xml)
+    root = ET.fromstring(sample_xml)  # noqa: S314
     return root.find("{http://www.w3.org/2005/Atom}entry")
 
 
@@ -82,7 +82,7 @@ def test_parse_basic_info(paper_entry):
             for energy differences on the order of 1 mHartree. This shows that, contrary to
             popular belief, description of the electron-electron cusp is not a limiting
             factor, to within chemical accuracy, for CI calculations.
-        """  # noqa: E501
+        """
     )
     assert len(info.authors) == 5
     assert isinstance(info.categories, Category)

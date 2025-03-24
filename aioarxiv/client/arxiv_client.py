@@ -20,8 +20,8 @@ from aioarxiv.models import (
     SortOrder,
 )
 from aioarxiv.utils import logger
-from aioarxiv.utils.log import set_config
-from aioarxiv.utils.parser import ArxivParser
+from aioarxiv.utils.arxiv_parser import ArxivParser
+from aioarxiv.utils.log import ConfigManager
 from aioarxiv.utils.session import SessionManager
 
 from .downloader import ArxivDownloader, DownloadTracker
@@ -32,6 +32,7 @@ class ArxivClient:
         self,
         config: Optional[ArxivConfig] = None,
         session_manager: Optional[SessionManager] = None,
+        *,
         enable_downloader: bool = False,
         download_dir: Optional[Path] = None,
     ) -> None:
@@ -48,7 +49,7 @@ class ArxivClient:
         self.download_dir = download_dir
         self._enable_downloader = enable_downloader
         self._downloader: Optional[ArxivDownloader] = None
-        set_config(self._config)
+        ConfigManager.set_config(config=self._config)
         logger.info(f"ArxivClient initialized with config: {self._config.model_dump()}")
 
     @property
@@ -282,7 +283,7 @@ class ArxivClient:
                     sort_order=sort_order,
                     start=start,
                 )
-            elif id_list:
+            if id_list:
                 return await self._search_by_ids(
                     id_list=id_list,
                     start=start,
@@ -449,27 +450,8 @@ class ArxivClient:
             QueryBuildError: If there's an error building the search query.
         """
         try:
-            query_params: dict[str, str] = {}
-
-            if params.query is not None:
-                query_params["search_query"] = params.query
-
-            query_params["start"] = str(params.start or 0)
-
-            if params.max_results is not None:
-                query_params["max_results"] = str(params.max_results)
-
-            if params.id_list:
-                query_params["id_list"] = ",".join(params.id_list)
-
-            if params.sort_by is not None:
-                query_params["sortBy"] = params.sort_by.value
-
-            if params.sort_order is not None:
-                query_params["sortOrder"] = params.sort_order.value
-
-            return query_params
-
+            query_params = self._create_base_params(params)
+            self._add_optional_params(query_params, params)
         except Exception as e:
             raise QueryBuildError(
                 message="Search query build failed",
@@ -485,6 +467,33 @@ class ArxivClient:
                 ),
                 original_error=e,
             ) from e
+        else:
+            return query_params
+
+    @staticmethod
+    def _create_base_params(params: SearchParams) -> dict[str, str]:
+        """Create base query parameters."""
+        query_params: dict[str, str] = {"start": str(params.start or 0)}
+        if params.query is not None:
+            query_params["search_query"] = params.query
+        return query_params
+
+    @staticmethod
+    def _add_optional_params(
+        query_params: dict[str, str], params: SearchParams
+    ) -> None:
+        """Add optional parameters to query params dict."""
+        if params.max_results is not None:
+            query_params["max_results"] = str(params.max_results)
+
+        if params.id_list:
+            query_params["id_list"] = ",".join(params.id_list)
+
+        if params.sort_by is not None:
+            query_params["sortBy"] = params.sort_by.value
+
+        if params.sort_order is not None:
+            query_params["sortOrder"] = params.sort_order.value
 
     async def download_paper(
         self,

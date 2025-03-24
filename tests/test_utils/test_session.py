@@ -36,7 +36,7 @@ async def mock_session(mocker: MockerFixture) -> AsyncGenerator[Any, None]:
         Any: Mocked ClientSession with async request method.
     """
 
-    def async_return(*args: Any, **kwargs: Any) -> asyncio.Future[Any]:
+    def async_return(*args: Any, **kwargs: Any) -> asyncio.Future[Any]:  # noqa: ARG001
         future = asyncio.Future()
         future.set_result(None)
         return future
@@ -164,7 +164,7 @@ async def test_rate_limiting(
     mocker.patch("asyncio.sleep", side_effect=mock_sleep)
 
     # Mock request
-    async def mock_request(*args: Any, **kwargs: Any) -> Any:
+    async def mock_request(*args: Any, **kwargs: Any) -> Any:  # noqa: ARG001
         return mock_response
 
     mocker.patch("aiohttp.ClientSession.request", side_effect=mock_request)
@@ -184,9 +184,9 @@ async def test_rate_limiting(
 
     # Verify sleep durations
     if sleep_durations:
-        assert all(
-            0 < d <= period for d in sleep_durations
-        ), f"Invalid sleep duration(s): {sleep_durations}"
+        assert all(0 < d <= period for d in sleep_durations), (
+            f"Invalid sleep duration(s): {sleep_durations}"
+        )
 
 
 @pytest.mark.asyncio

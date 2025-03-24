@@ -34,7 +34,7 @@ class MockResponse:
 
         class MockStreamReader:
             @staticmethod
-            async def iter_chunked(size: int) -> AsyncGenerator[bytes, None]:
+            async def iter_chunked(size: int) -> AsyncGenerator[bytes, None]:  # noqa: ARG004
                 yield outer_content
 
         return MockStreamReader()

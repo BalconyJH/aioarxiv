@@ -54,13 +54,13 @@ async def test_basic_rate_limiting(mocker: MockerFixture, limiter: RateLimiter) 
 
     # 验证结果
     assert results == [1, 2, 3], "函数调用应该按顺序执行"
-    assert (
-        len(sleep_calls) == 1
-    ), f"应该只有一次速率限制延迟，实际有 {len(sleep_calls)} 次"
+    assert len(sleep_calls) == 1, (
+        f"应该只有一次速率限制延迟, 实际有 {len(sleep_calls)} 次"
+    )
     if sleep_calls:
-        assert math.isclose(
-            sleep_calls[0], 1.0, rel_tol=0.05
-        ), f"延迟时间应接近 1.0 秒，实际为 {sleep_calls[0]:.2f} 秒"
+        assert math.isclose(sleep_calls[0], 1.0, rel_tol=0.05), (
+            f"延迟时间应接近 1.0 秒, 实际为 {sleep_calls[0]:.2f} 秒"
+        )
 
 
 @pytest.mark.asyncio
@@ -96,9 +96,9 @@ async def test_window_sliding(mocker: MockerFixture, limiter: RateLimiter) -> No
 
     assert len(sleep_calls) == 1, "应该只有一次速率限制延迟"
     if sleep_calls:
-        assert math.isclose(
-            sleep_calls[0], 1.0, rel_tol=0.05
-        ), f"延迟时间应接近 1.0 秒，实际为 {sleep_calls[0]:.2f} 秒"
+        assert math.isclose(sleep_calls[0], 1.0, rel_tol=0.05), (
+            f"延迟时间应接近 1.0 秒, 实际为 {sleep_calls[0]:.2f} 秒"
+        )
 
 
 @pytest.mark.asyncio
