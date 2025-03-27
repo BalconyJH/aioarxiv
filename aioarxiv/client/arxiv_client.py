@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 from aiohttp import ClientResponse
 
 from aioarxiv.config import ArxivConfig, default_config
-from aioarxiv.exception import HTTPException, QueryBuildError, QueryContext
+from aioarxiv.exception import HTTPException, QueryBuildError
 from aioarxiv.models import (
     Metadata,
     PageParam,
@@ -51,6 +51,16 @@ class ArxivClient:
         self._downloader: Optional[ArxivDownloader] = None
         ConfigManager.set_config(config=self._config)
         logger.info(f"ArxivClient initialized with config: {self._config.model_dump()}")
+        average_interval = (
+            self._config.rate_limit_period / self._config.rate_limit_calls
+        )
+        if self._config.rate_limit_period > 0 and average_interval < 3.0:
+            logger.warning(
+                f"Configration for rate limit calls and period ({average_interval}/s) may cause rate limiting due to "
+                f"arXiv API policy which limits to 1 request every 3 seconds. "
+                "Please refer to the (arXiv API documentation)[https://info.arxiv.org/help/api/tou.html] "
+                "for more details."
+            )
 
     @property
     def downloader(self) -> Optional[ArxivDownloader]:
@@ -124,12 +134,6 @@ class ArxivClient:
             tuple[SearchResult, bool]: Tuple containing search result and flag
             indicating whether more results need to be fetched.
         """
-        if not query and not id_list:
-            raise ValueError("Must provide either query or id_list")
-
-        if query and id_list:
-            raise ValueError("Cannot use both query and id_list")
-
         is_id_query = bool(id_list)
         page_size = min(self._config.page_size, max_results or self._config.page_size)
 
@@ -269,11 +273,6 @@ class ArxivClient:
         Returns:
             SearchResult: Search results object.
         """
-        if not query and not id_list:
-            raise ValueError("必须提供 query 或 id_list 中的一个")
-        if query and id_list:
-            raise ValueError("query 和 id_list 不能同时使用")
-
         try:
             if query:
                 return await self._search_by_query(
@@ -436,12 +435,12 @@ class ArxivClient:
 
         return valid_results
 
-    def _build_query_params(self, params: SearchParams) -> dict:
+    def _build_query_params(self, search_params: SearchParams) -> dict[str, str]:
         """
         Build query parameters for arXiv API request.
 
         Args:
-            params (SearchParams): Search parameters for the API request.
+            search_params (SearchParams): Search parameters for the API request.
 
         Returns:
             dict: Query parameters for the API request.
@@ -449,29 +448,12 @@ class ArxivClient:
         Raises:
             QueryBuildError: If there's an error building the search query.
         """
-        try:
-            query_params = self._create_base_params(params)
-            self._add_optional_params(query_params, params)
-        except Exception as e:
-            raise QueryBuildError(
-                message="Search query build failed",
-                context=QueryContext(
-                    params={
-                        "page_size": self._config.page_size,
-                        "max_results": params.max_results,
-                        "start": params.start,
-                        "id_list": params.id_list,
-                        "query": params.query,
-                    },
-                    field_name="query_params",
-                ),
-                original_error=e,
-            ) from e
-        else:
-            return query_params
+        query_params = self.__base_params(search_params)
+        self.__add_optional_params(query_params, search_params)
+        return query_params
 
     @staticmethod
-    def _create_base_params(params: SearchParams) -> dict[str, str]:
+    def __base_params(params: SearchParams) -> dict[str, str]:
         """Create base query parameters."""
         query_params: dict[str, str] = {"start": str(params.start or 0)}
         if params.query is not None:
@@ -479,21 +461,19 @@ class ArxivClient:
         return query_params
 
     @staticmethod
-    def _add_optional_params(
-        query_params: dict[str, str], params: SearchParams
-    ) -> None:
-        """Add optional parameters to query params dict."""
+    def __add_optional_params(query: dict[str, str], params: SearchParams) -> None:
+        """Add optional parameters to query dict in-place."""
         if params.max_results is not None:
-            query_params["max_results"] = str(params.max_results)
+            query["max_results"] = str(params.max_results)
 
         if params.id_list:
-            query_params["id_list"] = ",".join(params.id_list)
+            query["id_list"] = ",".join(params.id_list)
 
         if params.sort_by is not None:
-            query_params["sortBy"] = params.sort_by.value
+            query["sortBy"] = params.sort_by.value
 
         if params.sort_order is not None:
-            query_params["sortOrder"] = params.sort_order.value
+            query["sortOrder"] = params.sort_order.value
 
     async def download_paper(
         self,
