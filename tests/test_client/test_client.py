@@ -35,7 +35,7 @@ async def test_rate_limit_warning(mock_config, mocker):
     ArxivClient(config=config)
 
     mock_logger.warning.assert_called_once_with(
-        "Configration for rate limit calls and period (2.5/s) may cause rate limiting due to "
+        "Configuration for rate limit calls and period (2.5/s) may cause rate limiting due to "
         "arXiv API policy which limits to 1 request every 3 seconds. "
         "Please refer to the (arXiv API documentation)[https://info.arxiv.org/help/api/tou.html] "
         "for more details."

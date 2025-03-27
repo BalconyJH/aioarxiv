@@ -56,7 +56,7 @@ class ArxivClient:
         )
         if self._config.rate_limit_period > 0 and average_interval < 3.0:
             logger.warning(
-                f"Configration for rate limit calls and period ({average_interval}/s) may cause rate limiting due to "
+                f"Configuration for rate limit calls and period ({average_interval}/s) may cause rate limiting due to "
                 f"arXiv API policy which limits to 1 request every 3 seconds. "
                 "Please refer to the (arXiv API documentation)[https://info.arxiv.org/help/api/tou.html] "
                 "for more details."
