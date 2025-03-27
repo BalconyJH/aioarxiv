@@ -198,7 +198,7 @@ class PaperParser:
                 raise create_parser_exception(self.entry, "", message="缺少主分类信息")
             return PrimaryCategory(
                 term=primary_elem.get("term", ""),
-                scheme=cast(AnyUrl, primary_elem.attrib.get("scheme")),
+                scheme=cast("AnyUrl", primary_elem.attrib.get("scheme")),
                 label=primary_elem.get("label"),
             )
 
@@ -269,7 +269,7 @@ class PaperParser:
                 logger.warning("未找到PDF链接")
                 return None
 
-            return cast(HttpUrl, pdf_url)  # stupid type checker
+            return cast("HttpUrl", pdf_url)
 
         except (KeyError, AttributeError) as e:
             raise create_parser_exception(

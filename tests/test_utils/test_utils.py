@@ -4,7 +4,7 @@ from io import StringIO
 import math
 from time import monotonic
 from types import SimpleNamespace
-from typing import cast
+from typing import TYPE_CHECKING, cast
 import xml.etree.ElementTree as ET
 from zoneinfo import ZoneInfo
 
@@ -13,7 +13,6 @@ from aiohttp import ClientResponse, TraceRequestEndParams, TraceRequestStartPara
 from loguru import logger
 from multidict import CIMultiDict
 import pytest
-from tenacity import RetryCallState
 from yarl import URL
 
 from aioarxiv.utils import (
@@ -24,6 +23,9 @@ from aioarxiv.utils import (
     log_retry_attempt,
     sanitize_title,
 )
+
+if TYPE_CHECKING:
+    from tenacity import RetryCallState
 
 TOLERANCE = 0.25
 
@@ -396,7 +398,7 @@ async def test_sanitize_title_custom_length():
 async def test_log_retry_attempt(mock_retry_state, capture_debug_logs):
     """测试重试日志记录功能"""
     # 执行日志记录
-    log_retry_attempt(cast(RetryCallState, mock_retry_state))
+    log_retry_attempt(cast("RetryCallState", mock_retry_state))
 
     # 获取日志内容
     log_output = capture_debug_logs.getvalue()

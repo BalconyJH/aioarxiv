@@ -1,6 +1,6 @@
 from datetime import datetime
 import pathlib
-from typing import cast
+from typing import TYPE_CHECKING, cast
 import xml.etree.ElementTree as ET
 from zoneinfo import ZoneInfo
 
@@ -12,6 +12,9 @@ from yarl import URL
 from aioarxiv.exception import ParserException
 from aioarxiv.models import Category, Paper
 from aioarxiv.utils.arxiv_parser import ArxivParser, PaperParser
+
+if TYPE_CHECKING:
+    from pydantic import HttpUrl
 
 SAMPLE_XML_PATH = pathlib.Path(__file__).parent.parent / "data" / "sample.xml"
 
@@ -93,7 +96,7 @@ def test_parse_basic_info(paper_entry):
 def test_parse_pdf_url(paper_entry):
     parser = PaperParser(paper_entry)
     url = parser.parse_pdf_url()
-    assert url == cast(HttpUrl, "http://arxiv.org/pdf/cond-mat/0102536v1")
+    assert url == cast("HttpUrl", "http://arxiv.org/pdf/cond-mat/0102536v1")
 
 
 def test_parse_optional_fields(paper_entry):
