@@ -1,9 +1,5 @@
 # Starter
 
-<warning>
-This project is currently in the testing phase and has not yet reached a stable release. Do not use it in production environments.
-</warning>
-
 ## Introduction
 
 Async Python client for arXiv API with built-in rate limiting and paper downloads.

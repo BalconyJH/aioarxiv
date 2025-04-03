@@ -1,3 +1,0 @@
-# Testing Guide
-
-Start typing here...

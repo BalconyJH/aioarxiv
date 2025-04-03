@@ -43,6 +43,16 @@ All configuration values are validated through Pydantic's type checking system, 
     </tab>
 </tabs>
 
+## Configuration Model Settings
+
+The configuration model uses the following settings:
+
+- `env_prefix`: "ARXIV_" (prefix for environment variables)
+- `env_file_encoding`: "utf-8" (encoding for .env file)
+- `case_sensitive`: False (case-insensitive environment variables)
+- `env_file`: ".env" (default environment file name)
+- `extra`: "allow" (allows additional configuration fields)
+
 ## Configuration Details
 
 <table>
@@ -67,7 +77,7 @@ All configuration values are validated through Pydantic's type checking system, 
         <td>API request timeout in seconds</td>
         <td>float</td>
         <td><code>30.0</code></td>
-        <td>Must be > 0</td>
+        <td>gt=0 (greater than 0)</td>
         <td><code>ARXIV_TIMEOUT</code></td>
     </tr>
     <tr>
@@ -83,7 +93,7 @@ All configuration values are validated through Pydantic's type checking system, 
         <td>Maximum number of retry attempts for failed requests</td>
         <td>integer</td>
         <td><code>3</code></td>
-        <td>Must be >= 0</td>
+        <td>ge=0 (greater than or equal to 0)</td>
         <td><code>ARXIV_MAX_RETRIES</code></td>
     </tr>
     <tr>
@@ -91,7 +101,7 @@ All configuration values are validated through Pydantic's type checking system, 
         <td>Maximum number of requests within the rate limit window</td>
         <td>integer</td>
         <td><code>1</code></td>
-        <td>Must be >= 0</td>
+        <td>ge=0 (greater than or equal to 0)</td>
         <td><code>ARXIV_RATE_LIMIT_CALLS</code></td>
     </tr>
     <tr>
@@ -99,7 +109,7 @@ All configuration values are validated through Pydantic's type checking system, 
         <td>Rate limit window period in seconds</td>
         <td>float</td>
         <td><code>3.0</code></td>
-        <td>Must be >= 0</td>
+        <td>ge=0 (greater than or equal to 0)</td>
         <td><code>ARXIV_RATE_LIMIT_PERIOD</code></td>
     </tr>
     <tr>
@@ -139,7 +149,7 @@ All configuration values are validated through Pydantic's type checking system, 
         <td>Minimum wait time between retries in seconds</td>
         <td>float</td>
         <td><code>3.0</code></td>
-        <td>Must be > 0</td>
+        <td>gt=0 (greater than 0)</td>
         <td><code>ARXIV_MIN_WAIT</code></td>
     </tr>
 </table>
