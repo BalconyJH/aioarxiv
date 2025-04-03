@@ -1,6 +1,6 @@
 from datetime import datetime
 import pathlib
-from typing import cast
+from typing import TYPE_CHECKING, cast
 import xml.etree.ElementTree as ET
 from zoneinfo import ZoneInfo
 
@@ -11,7 +11,10 @@ from yarl import URL
 
 from aioarxiv.exception import ParserException
 from aioarxiv.models import Category, Paper
-from aioarxiv.utils.parser import ArxivParser, PaperParser
+from aioarxiv.utils.arxiv_parser import ArxivParser, PaperParser
+
+if TYPE_CHECKING:
+    from pydantic import HttpUrl
 
 SAMPLE_XML_PATH = pathlib.Path(__file__).parent.parent / "data" / "sample.xml"
 
@@ -31,7 +34,7 @@ def mock_response(mocker, sample_xml):
 
 @pytest.fixture
 def paper_entry(sample_xml):
-    root = ET.fromstring(sample_xml)
+    root = ET.fromstring(sample_xml)  # noqa: S314
     return root.find("{http://www.w3.org/2005/Atom}entry")
 
 
@@ -82,7 +85,7 @@ def test_parse_basic_info(paper_entry):
             for energy differences on the order of 1 mHartree. This shows that, contrary to
             popular belief, description of the electron-electron cusp is not a limiting
             factor, to within chemical accuracy, for CI calculations.
-        """  # noqa: E501
+        """
     )
     assert len(info.authors) == 5
     assert isinstance(info.categories, Category)
@@ -93,7 +96,7 @@ def test_parse_basic_info(paper_entry):
 def test_parse_pdf_url(paper_entry):
     parser = PaperParser(paper_entry)
     url = parser.parse_pdf_url()
-    assert url == cast(HttpUrl, "http://arxiv.org/pdf/cond-mat/0102536v1")
+    assert url == cast("HttpUrl", "http://arxiv.org/pdf/cond-mat/0102536v1")
 
 
 def test_parse_optional_fields(paper_entry):

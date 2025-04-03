@@ -28,5 +28,3 @@ jobs:
         uses: astral-sh/ruff-action@v3
       - name: Run Ruff Check
         run: ruff check
-      - name: Run Ruff Format
-        run: ruff format

@@ -159,6 +159,6 @@ class RateLimiter:
                 # Proceed with the original function call
                 return await func(*args, **kwargs)
 
-            return cast(T, wrapper)
+            return cast("T", wrapper)
 
         return decorator

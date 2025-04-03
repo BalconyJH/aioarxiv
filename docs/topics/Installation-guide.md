@@ -5,10 +5,6 @@
 This installation guide is designed to help users successfully install and configure **aioarxiv** or add it as a project
 dependency.
 
-<warning>
-Warning: This project is currently in the testing phase and has not yet reached a stable release. Do not use it in production environments.
-</warning>
-
 ---
 
 ## Installation types
@@ -16,12 +12,13 @@ Warning: This project is currently in the testing phase and has not yet reached 
 We strongly recommend using package managers like [PDM](https://pdm-project.org/)
 or [Poetry](https://python-poetry.org/) to manage project dependencies.
 
-| **Type**        | **Description**                                   | **More information**                                                                    |
-|-----------------|---------------------------------------------------|-----------------------------------------------------------------------------------------|
-| PDM   | Add `aioarxiv` to project dependencies.           | <a href="Installation-guide.md#installation-steps_pdm">PDM Installation Steps</a>       |
-| Poetry | Add `aioarxiv` to project dependencies.           | <a href="Installation-guide.md#installation-steps_poetry">Poetry Installation Steps</a> |
-| PyPI | Install using `pip` in supported Python versions. | <a href="Installation-guide.md#installation-steps_pypi">PyPI Installation Steps</a>     |
-| Source | Clone from GitHub and install manually.           | <a href="Installation-guide.md#installation-steps_source">Source Installation Steps</a> |
+| **Type** | **Description**                                      | **More information**                                                                    |
+|----------|------------------------------------------------------|-----------------------------------------------------------------------------------------|
+| PDM      | Add `aioarxiv` to project dependencies.              | <a href="Installation-guide.md#installation-steps_pdm">PDM Installation Steps</a>       |
+| Poetry   | Add `aioarxiv` to project dependencies.              | <a href="Installation-guide.md#installation-steps_poetry">Poetry Installation Steps</a> |
+| UV       | Install using `uv` for faster dependency resolution. | <a href="Installation-guide.md#installation-steps_uv">UV Installation Steps</a>         |
+| PyPI     | Install using `pip` in supported Python versions.    | <a href="Installation-guide.md#installation-steps_pypi">PyPI Installation Steps</a>     |
+| Source   | Clone from GitHub and install manually.              | <a href="Installation-guide.md#installation-steps_source">Source Installation Steps</a> |
 
 ---
 
@@ -32,10 +29,11 @@ or [Poetry](https://python-poetry.org/) to manage project dependencies.
 Below are the available versions of this library. We do not recommend relying on this library in production environments
 at this time:
 
-| **Version** | **Build**    | **Release Date** | **Status** | **Notes**             |
-|-------------|--------------|------------------|------------|-----------------------|
-| 0.2.0       | PyPI Release | 13/1/2025        | Latest     | Initial testing phase |
-| 0.1.2       | PyPI Release | 15/11/2024       | Old        | Initial testing phase |
+| **Version** | **Build**                                                | **Release Date** | **Status** | **Notes**                                       |
+|-------------|----------------------------------------------------------|------------------|------------|-------------------------------------------------|
+| 0.2.1       | [PyPI Release](https://pypi.org/project/aioarxiv/0.2.1/) | 03/04/2025       | Latest     | Documentation updates and new search experience |
+| 0.2.0       | [PyPI Release](https://pypi.org/project/aioarxiv/0.2.0/) | 13/01/2025       | Old        | Bug fixes and improvements                      |
+| 0.1.2       | [PyPI Release](https://pypi.org/project/aioarxiv/0.1.2/) | 15/11/2024       | Old        | Initial release                                 |
 
 ## System requirements
 
@@ -82,6 +80,18 @@ Ensure your Python version is within the supported range before installing this 
                 Run the following command:
                 <code-block lang="bash">
                     pip install aioarxiv
+                </code-block>
+            </step>
+        </procedure>
+    </tab>
+    <tab title="UV Installation" id="installation-steps_uv">
+        <p>To install aioarxiv using uv:</p>
+        <procedure>
+            <step>Open your terminal</step>
+            <step>
+                Run the following command:
+                <code-block lang="bash">
+                    uv add aioarxiv
                 </code-block>
             </step>
         </procedure>

@@ -24,7 +24,7 @@ def create_trace_config() -> aiohttp.TraceConfig:
     """
 
     async def _on_request_start(
-        session: aiohttp.ClientSession,
+        session: aiohttp.ClientSession,  # noqa: ARG001
         trace_config_ctx: SimpleNamespace,
         params: aiohttp.TraceRequestStartParams,
     ) -> None:
@@ -40,7 +40,7 @@ def create_trace_config() -> aiohttp.TraceConfig:
         trace_config_ctx.start_time = monotonic()
 
     async def _on_request_end(
-        session: aiohttp.ClientSession,
+        session: aiohttp.ClientSession,  # noqa: ARG001
         trace_config_ctx: SimpleNamespace,
         params: aiohttp.TraceRequestEndParams,
     ) -> None:

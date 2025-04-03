@@ -4,6 +4,7 @@ import xml.etree.ElementTree as ET
 from zoneinfo import ZoneInfo
 
 from aiohttp import ClientResponse
+from defusedxml import ElementTree as DefusedET
 from pydantic import AnyUrl, HttpUrl
 from yarl import URL
 
@@ -47,7 +48,7 @@ class ArxivParser:
     def __init__(self, response_context: str, raw_response: ClientResponse) -> None:
         self.response_context = response_context
         self.raw_response = raw_response
-        self.entry = ET.fromstring(response_context)  # Root element of the XML tree
+        self.entry = DefusedET.fromstring(response_context)
 
     @staticmethod
     def build_paper(
@@ -68,20 +69,24 @@ class ArxivParser:
 
         Returns:
             list[Paper]: 论文列表
+
+        Raises:
+            ParserException: 如果解析失败
         """
+        entries = self.entry.findall("atom:entry", ArxivParser.NS)
         papers = []
-        for i, entry in enumerate(self.entry.findall("atom:entry", ArxivParser.NS)):
-            try:
-                papers.append(self.build_paper(entry))
-            except Exception as e:
+
+        for i, entry in enumerate(entries):
+            if paper := self.build_paper(entry):
+                papers.append(paper)
+
+            else:
                 raise create_parser_exception(
                     entry,
                     str(self.raw_response.url),
                     message=f"解析第 {i + 1} 篇论文失败",
                     namespace=ArxivParser.NS["atom"],
-                    error=e,
-                ) from e
-
+                )
         return papers
 
     def parse_feed(self) -> list[Paper]:
@@ -93,8 +98,6 @@ class ArxivParser:
         """
         try:
             papers = self._parse_root()
-            logger.trace(f"Parsed {len(papers)} papers")
-            return papers
         except ET.ParseError as e:
             raise create_parser_exception(
                 self.entry,
@@ -104,6 +107,9 @@ class ArxivParser:
             ) from e
         except ParserException:
             raise
+        else:
+            logger.trace(f"Parsed {len(papers)} papers")
+            return papers
 
     def parse_total_result(self) -> int:
         """
@@ -192,7 +198,7 @@ class PaperParser:
                 raise create_parser_exception(self.entry, "", message="缺少主分类信息")
             return PrimaryCategory(
                 term=primary_elem.get("term", ""),
-                scheme=cast(AnyUrl, primary_elem.attrib.get("scheme")),
+                scheme=cast("AnyUrl", primary_elem.attrib.get("scheme")),
                 label=primary_elem.get("label"),
             )
 
@@ -263,7 +269,7 @@ class PaperParser:
                 logger.warning("未找到PDF链接")
                 return None
 
-            return cast(HttpUrl, pdf_url)  # stupid type checker
+            return cast("HttpUrl", pdf_url)
 
         except (KeyError, AttributeError) as e:
             raise create_parser_exception(

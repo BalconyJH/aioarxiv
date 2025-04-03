@@ -4,7 +4,7 @@ from io import StringIO
 import math
 from time import monotonic
 from types import SimpleNamespace
-from typing import cast
+from typing import TYPE_CHECKING, cast
 import xml.etree.ElementTree as ET
 from zoneinfo import ZoneInfo
 
@@ -13,7 +13,6 @@ from aiohttp import ClientResponse, TraceRequestEndParams, TraceRequestStartPara
 from loguru import logger
 from multidict import CIMultiDict
 import pytest
-from tenacity import RetryCallState
 from yarl import URL
 
 from aioarxiv.utils import (
@@ -24,6 +23,9 @@ from aioarxiv.utils import (
     log_retry_attempt,
     sanitize_title,
 )
+
+if TYPE_CHECKING:
+    from tenacity import RetryCallState
 
 TOLERANCE = 0.25
 
@@ -163,9 +165,7 @@ async def test_create_trace_config_error_case(
 
 
 @pytest.mark.asyncio
-async def test_create_trace_config_multiple_requests(
-    mock_session, mock_response, capture_debug_logs
-):
+async def test_create_trace_config_multiple_requests(mock_session, mock_response):
     """
     测试多个连续请求的追踪配置
     """
@@ -201,9 +201,9 @@ async def test_create_trace_config_multiple_requests(
         elapsed_times.append(elapsed_time)
 
     for expected, actual in zip(delays, elapsed_times):
-        assert math.isclose(
-            actual, expected, rel_tol=TOLERANCE
-        ), f"请求耗时不在预期范围内: 期望约为{expected}秒, 实际为{actual:.4f}秒"
+        assert math.isclose(actual, expected, rel_tol=TOLERANCE), (
+            f"请求耗时不在预期范围内: 期望约为{expected}秒, 实际为{actual:.4f}秒"
+        )
 
 
 def test_create_parser_exception_basic(sample_xml_element):
@@ -398,7 +398,7 @@ async def test_sanitize_title_custom_length():
 async def test_log_retry_attempt(mock_retry_state, capture_debug_logs):
     """测试重试日志记录功能"""
     # 执行日志记录
-    log_retry_attempt(cast(RetryCallState, mock_retry_state))
+    log_retry_attempt(cast("RetryCallState", mock_retry_state))
 
     # 获取日志内容
     log_output = capture_debug_logs.getvalue()

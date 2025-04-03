@@ -6,14 +6,19 @@ from pydantic import BaseModel, HttpUrl
 
 
 class ArxivException(Exception):
-    """基础异常类"""
+    """Base exception class for arXiv operations."""
 
     def __str__(self) -> str:
         return super().__repr__()
 
 
 class HTTPException(ArxivException):
-    """HTTP 请求相关异常"""
+    """Exception for HTTP request-related errors.
+
+    Args:
+        status_code: HTTP status code.
+        message: Optional error message (defaults to HTTP status description).
+    """
 
     def __init__(self, status_code: int, message: Optional[str] = None) -> None:
         self.status_code = status_code
@@ -22,7 +27,11 @@ class HTTPException(ArxivException):
 
 
 class RateLimitException(HTTPException):
-    """达到 API 速率限制时的异常"""
+    """Exception raised when API rate limit is reached.
+
+    Args:
+        retry_after: Optional number of seconds to wait before retrying.
+    """
 
     def __init__(self, retry_after: Optional[int] = None) -> None:
         self.retry_after = retry_after
@@ -30,7 +39,16 @@ class RateLimitException(HTTPException):
 
 
 class ValidationException(ArxivException):
-    """数据验证异常"""
+    """Exception for data validation errors.
+
+    Args:
+        message: Error message.
+        field_name: Name of the field that failed validation.
+        input_value: Invalid input value.
+        expected_type: Expected type for the field.
+        model: Optional Pydantic model class.
+        validation_errors: Optional dictionary of validation errors.
+    """
 
     def __init__(
         self,
@@ -67,7 +85,14 @@ class ValidationException(ArxivException):
 
 
 class TimeoutException(ArxivException):
-    """请求超时异常"""
+    """Exception for request timeouts.
+
+    Args:
+        timeout: Timeout duration in seconds.
+        message: Optional error message.
+        proxy: Optional proxy URL used.
+        link: Optional target URL.
+    """
 
     def __init__(
         self,
@@ -99,7 +124,14 @@ class TimeoutException(ArxivException):
 
 @dataclass
 class ConfigError:
-    """配置错误详情"""
+    """Configuration error details.
+
+    Attributes:
+        property_name: Name of the problematic property.
+        input_value: Invalid input value.
+        expected_type: Expected type for the property.
+        message: Error message.
+    """
 
     property_name: str
     input_value: Any
@@ -108,7 +140,15 @@ class ConfigError:
 
 
 class ConfigurationError(ArxivException):
-    """配置错误异常"""
+    """Exception for configuration errors.
+
+    Args:
+        message: Error message.
+        property_name: Name of the problematic property.
+        input_value: Invalid input value.
+        expected_type: Expected type for the property.
+        config_class: Optional configuration class.
+    """
 
     def __init__(
         self,
@@ -141,16 +181,29 @@ class ConfigurationError(ArxivException):
 
 @dataclass
 class QueryContext:
-    """查询构建上下文"""
+    """Context for query building operations.
 
-    params: dict[str, Any]  # 查询参数
-    field_name: Optional[str] = None  # 出错的字段
-    value: Optional[Any] = None  # 问题值
-    constraint: Optional[str] = None  # 违反的约束
+    Attributes:
+        params: Query parameters.
+        field_name: Name of the problematic field.
+        value: Problematic value.
+        constraint: Violated constraint.
+    """
+
+    params: dict[str, Any]
+    field_name: Optional[str] = None
+    value: Optional[Any] = None
+    constraint: Optional[str] = None
 
 
 class QueryBuildError(ArxivException):
-    """查询构建错误"""
+    """Exception for query building errors.
+
+    Args:
+        message: Error message.
+        context: Optional query context.
+        original_error: Optional original exception.
+    """
 
     def __init__(
         self,
@@ -164,29 +217,29 @@ class QueryBuildError(ArxivException):
         super().__init__(message)
 
     def __str__(self) -> str:
-        error_parts = [f"查询构建错误: {self.message}"]
+        error_parts = [f"Query build error: {self.message}"]
 
         if self.context:
             if self.context.params:
-                error_parts.append("参数:")
+                error_parts.append("Parameters:")
                 error_parts.extend(
                     f"  • {k}: {v!r}" for k, v in self.context.params.items()
                 )
 
             if self.context.field_name:
-                error_parts.append(f"问题字段: {self.context.field_name}")
+                error_parts.append(f"Problem field: {self.context.field_name}")
 
             if self.context.value is not None:
-                error_parts.append(f"问题值: {self.context.value!r}")
+                error_parts.append(f"Problem value: {self.context.value!r}")
 
             if self.context.constraint:
-                error_parts.append(f"约束条件: {self.context.constraint}")
+                error_parts.append(f"Constraint: {self.context.constraint}")
 
         if self.original_error:
             error_parts.extend(
                 [
-                    f"原始错误: {self.original_error!s}",
-                    f"原始错误类型: {type(self.original_error).__name__}",
+                    f"Original error: {self.original_error!s}",
+                    f"Original error type: {type(self.original_error).__name__}",
                 ],
             )
 
@@ -195,7 +248,14 @@ class QueryBuildError(ArxivException):
 
 @dataclass
 class ParseErrorContext:
-    """解析错误上下文"""
+    """Context for parsing errors.
+
+    Attributes:
+        raw_content: Raw content being parsed.
+        position: Error position in content.
+        element_name: Name of problematic element.
+        namespace: XML namespace.
+    """
 
     raw_content: Optional[str] = None
     position: Optional[int] = None
@@ -204,7 +264,14 @@ class ParseErrorContext:
 
 
 class ParserException(Exception):
-    """XML解析异常"""
+    """Exception for XML parsing errors.
+
+    Args:
+        url: URL being parsed.
+        message: Error message.
+        context: Optional parsing context.
+        original_error: Optional original exception.
+    """
 
     def __init__(
         self,
@@ -220,38 +287,46 @@ class ParserException(Exception):
         super().__init__(self.message)
 
     def __str__(self) -> str:
-        parts = [f"解析错误: {self.message}", f"URL: {self.url}"]
+        parts = [f"Parse error: {self.message}", f"URL: {self.url}"]
 
         if self.context:
             if self.context.element_name:
-                parts.append(f"元素: {self.context.element_name}")
+                parts.append(f"Element: {self.context.element_name}")
             if self.context.namespace:
-                parts.append(f"命名空间: {self.context.namespace}")
+                parts.append(f"Namespace: {self.context.namespace}")
             if self.context.position is not None:
-                parts.append(f"位置: {self.context.position}")
+                parts.append(f"Position: {self.context.position}")
             if self.context.raw_content:
-                parts.append(f"原始内容: \n{self.context.raw_content[:200]}...")
+                parts.append(f"Raw content: \n{self.context.raw_content[:200]}...")
 
         if self.original_error:
-            parts.append(f"原始错误: {self.original_error!s}")
+            parts.append(f"Original error: {self.original_error!s}")
 
         return "\n".join(parts)
 
 
 class SearchCompleteException(ArxivException):
-    """搜索完成异常"""
+    """Exception indicating search completion.
+
+    Args:
+        total_results: Total number of results found.
+    """
 
     def __init__(self, total_results: int) -> None:
         self.total_results = total_results
-        super().__init__(f"搜索完成,共获取{total_results}条结果")
+        super().__init__(f"Search complete with {total_results} results")
 
 
 class PaperDownloadException(ArxivException):
-    """论文下载异常"""
+    """Exception for paper download failures.
+
+    Args:
+        message: Error message describing the failure.
+    """
 
     def __init__(self, message: str) -> None:
         self.message = message
         super().__init__(message)
 
     def __str__(self) -> str:
-        return f"论文下载异常: {self.message}"
+        return f"Paper download error: {self.message}"

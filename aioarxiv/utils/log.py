@@ -24,20 +24,25 @@ usage:
     ```python
     from log import logger
     ```
-"""  # noqa: E501
-
-_current_config: Optional[ArxivConfig] = None
+"""
 
 
-def set_config(config: ArxivConfig) -> None:
-    """set current global config"""
-    global _current_config
-    _current_config = config
+class ConfigManager:
+    _instance = None
+    _config: Optional[ArxivConfig] = None
 
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
 
-def get_config() -> ArxivConfig:
-    """get current config or default config"""
-    return _current_config or default_config
+    @classmethod
+    def set_config(cls, config: ArxivConfig) -> None:
+        cls._config = config
+
+    @classmethod
+    def get_config(cls) -> ArxivConfig:
+        return cls._config or default_config
 
 
 # https://loguru.readthedocs.io/en/stable/overview.html#entirely-compatible-with-standard-logging
@@ -68,7 +73,7 @@ def default_filter(record: "Record"):
     log_level = record["extra"].get("arxiv_log_level")
 
     if log_level is None:
-        config = get_config()
+        config = ConfigManager.get_config()
         log_level = config.log_level if config else default_config.log_level
 
     levelno = logger.level(log_level).no if isinstance(log_level, str) else log_level
