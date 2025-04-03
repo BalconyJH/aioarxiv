@@ -21,7 +21,7 @@ from aioarxiv.config import default_config
 
 
 class SortCriterion(str, Enum):
-    """排序标准"""
+    """Sort criteria for search results."""
 
     RELEVANCE = "relevance"
     LAST_UPDATED = "lastUpdatedDate"
@@ -29,58 +29,105 @@ class SortCriterion(str, Enum):
 
 
 class SortOrder(str, Enum):
-    """排序方向"""
+    """Sort direction for search results."""
 
     ASCENDING = "ascending"
     DESCENDING = "descending"
 
 
 class Author(BaseModel):
-    """作者模型"""
+    """Author model representing paper authors.
 
-    name: str = Field(description="作者姓名")
-    affiliation: Optional[str] = Field(None, description="作者的机构隶属信息")
+    Attributes:
+        name: Author's full name.
+        affiliation: Author's institutional affiliation.
+    """
+
+    name: str = Field(description="Author's name")
+    affiliation: Optional[str] = Field(
+        None, description="Author's institutional affiliation"
+    )
 
 
 class PrimaryCategory(BaseModel):
-    """主分类模型"""
+    """Primary category model for paper classification.
 
-    term: str = Field(description="分类标识符")
-    scheme: Optional[AnyUrl] = Field(None, description="分类系统的 URI")
-    label: Optional[str] = Field(None, description="分类标签")
+    Attributes:
+        term: Category identifier.
+        scheme: URI of the classification system.
+        label: Human-readable category label.
+    """
+
+    term: str = Field(description="Category identifier")
+    scheme: Optional[AnyUrl] = Field(None, description="Classification system URI")
+    label: Optional[str] = Field(None, description="Category label")
 
 
 class Category(BaseModel):
-    """分类模型"""
+    """Category model containing primary and secondary classifications.
 
-    primary: PrimaryCategory = Field(description="主分类")
-    secondary: list[str] = Field(description="次级分类列表")
+    Attributes:
+        primary: Primary category classification.
+        secondary: List of secondary category classifications.
+    """
+
+    primary: PrimaryCategory = Field(description="Primary category")
+    secondary: list[str] = Field(description="Secondary categories")
 
 
 class BasicInfo(BaseModel):
-    """基础论文信息"""
+    """Basic paper information model.
+
+    Attributes:
+        id: arXiv paper ID.
+        title: Paper title.
+        summary: Paper abstract.
+        authors: List of paper authors.
+        categories: Paper categories.
+        published: Publication timestamp.
+        updated: Last update timestamp.
+    """
 
     id: str = Field(description="arXiv ID")
-    title: str = Field(description="标题")
-    summary: str = Field(description="摘要")
-    authors: list[Author] = Field(description="作者列表")
-    categories: Category = Field(description="分类")
-    published: datetime = Field(description="发布时间")
-    updated: datetime = Field(description="更新时间")
+    title: str = Field(description="Title")
+    summary: str = Field(description="Abstract")
+    authors: list[Author] = Field(description="Authors")
+    categories: Category = Field(description="Categories")
+    published: datetime = Field(description="Publication timestamp")
+    updated: datetime = Field(description="Last update timestamp")
 
 
 class Paper(BaseModel):
-    """论文模型"""
+    """Paper model containing complete paper information.
 
-    info: BasicInfo = Field(description="基础信息")
-    doi: Optional[str] = Field(None, description="DOI, 格式需符合正则")
-    journal_ref: Optional[str] = Field(None, description="期刊引用")
-    pdf_url: Optional[HttpUrl] = Field(None, description="PDF下载链接")
-    comment: Optional[str] = Field(None, description="作者评论或注释")
+    Attributes:
+        info: Basic paper information.
+        doi: Digital Object Identifier.
+        journal_ref: Journal reference.
+        pdf_url: URL for PDF download.
+        comment: Author comments or notes.
+    """
+
+    info: BasicInfo = Field(description="Basic information")
+    doi: Optional[str] = Field(None, description="DOI (must match regex pattern)")
+    journal_ref: Optional[str] = Field(None, description="Journal reference")
+    pdf_url: Optional[HttpUrl] = Field(None, description="PDF download URL")
+    comment: Optional[str] = Field(None, description="Author comments or notes")
 
     @field_validator("doi")
     @classmethod
     def validate_doi(cls, v: Optional[str]) -> Optional[str]:
+        """Validate DOI format.
+
+        Args:
+            v: DOI string to validate.
+
+        Returns:
+            The validated DOI string.
+
+        Raises:
+            ValueError: If DOI format is invalid.
+        """
         if v is None:
             return v
 
@@ -92,43 +139,62 @@ class Paper(BaseModel):
 
 
 class SearchParams(BaseModel):
-    """搜索参数"""
+    """Search parameters model.
 
-    query: Optional[str] = Field(None, description="搜索关键词")
-    id_list: Optional[list[str]] = Field(None, description="需要精确搜索的ID列表")
-    start: Optional[int] = Field(default=0, ge=0, description="起始索引")
-    max_results: Optional[int] = Field(default=10, gt=0, description="最大返回结果数")
-    sort_by: Optional[SortCriterion] = Field(None, description="排序标准")
-    sort_order: Optional[SortOrder] = Field(None, description="排序方向")
+    Attributes:
+        query: Search keywords.
+        id_list: List of specific arXiv IDs to search.
+        start: Starting index for results.
+        max_results: Maximum number of results to return.
+        sort_by: Sorting criterion.
+        sort_order: Sort direction.
+    """
+
+    query: Optional[str] = Field(None, description="Search keywords")
+    id_list: Optional[list[str]] = Field(
+        None, description="Specific arXiv IDs to search"
+    )
+    start: Optional[int] = Field(default=0, ge=0, description="Starting index")
+    max_results: Optional[int] = Field(default=10, gt=0, description="Maximum results")
+    sort_by: Optional[SortCriterion] = Field(None, description="Sort criterion")
+    sort_order: Optional[SortOrder] = Field(None, description="Sort direction")
 
 
 class Metadata(BaseModel):
-    """元数据模型"""
+    """Metadata model for search operations.
+
+    Attributes:
+        start_time: Request creation timestamp.
+        end_time: Request completion timestamp.
+        missing_results: Number of missing results.
+        pagesize: Results per page.
+        source: Data source URL.
+    """
 
     start_time: datetime = Field(
         default_factory=lambda: datetime.now(tz=ZoneInfo(default_config.timezone)),
-        description="请求创建时间",
+        description="Request creation timestamp",
     )
     end_time: Optional[datetime] = Field(
         None,
-        description="请求结束时间",
+        description="Request completion timestamp",
     )
-    missing_results: int = Field(description="缺失结果数")
-    pagesize: int = Field(description="每页结果数")
-    source: URL = Field(description="数据源")
+    missing_results: int = Field(description="Missing results count")
+    pagesize: int = Field(description="Results per page")
+    source: URL = Field(description="Data source URL")
 
     model_config = {"arbitrary_types_allowed": True}
 
     @computed_field
     def duration_seconds(self) -> float:
-        """持续时间(秒),  保留3位小数"""
+        """Calculate duration in seconds (3 decimal places)."""
         if self.end_time is None:
             return 0.000
         return round((self.end_time - self.start_time).total_seconds(), 3)
 
     @computed_field
     def duration_ms(self) -> float:
-        """持续时间(毫秒),  保留3位小数"""
+        """Calculate duration in milliseconds (3 decimal places)."""
         if self.end_time is None:
             return 0.000
         delta = self.end_time - self.start_time
@@ -136,41 +202,62 @@ class Metadata(BaseModel):
 
 
 class SearchResult(BaseModel):
-    """搜索结果模型"""
+    """Search result model containing papers and metadata.
+
+    Attributes:
+        id: Result UUID.
+        papers: List of paper results.
+        total_result: Total number of matching papers.
+        page: Current page number.
+        has_next: Whether there are more pages.
+        query_params: Search parameters used.
+        metadata: Search operation metadata.
+    """
 
     id: UUID4 = Field(
         default_factory=lambda: uuid.uuid4(),
-        description="结果ID",
+        description="Result UUID",
     )
-    papers: list[Paper] = Field(description="论文结果列表")
-    total_result: int = Field(description="匹配的总论文数量")
-    page: int = Field(description="当前页码")
-    has_next: bool = Field(description="是否有下一页")
-    query_params: SearchParams = Field(description="搜索参数")
-    metadata: Metadata = Field(description="元数据")
+    papers: list[Paper] = Field(description="Paper results")
+    total_result: int = Field(description="Total matching papers")
+    page: int = Field(description="Current page number")
+    has_next: bool = Field(description="Has next page")
+    query_params: SearchParams = Field(description="Search parameters")
+    metadata: Metadata = Field(description="Operation metadata")
 
     @computed_field
     def papers_count(self) -> int:
+        """Get the number of papers in the result."""
         return len(self.papers)
 
 
 class DownloadStats(BaseModel):
-    """下载统计数据"""
+    """Download statistics model.
 
-    total: int = Field(description="总下载数")
-    completed: int = Field(default=0, description="完成数")
-    failed: int = Field(default=0, description="失败数")
+    Attributes:
+        total: Total number of downloads.
+        completed: Number of completed downloads.
+        failed: Number of failed downloads.
+        start_time: Download start timestamp.
+        end_time: Download completion timestamp.
+        papers: List of successfully downloaded papers.
+        failed_papers: List of papers that failed to download with errors.
+    """
+
+    total: int = Field(description="Total downloads")
+    completed: int = Field(default=0, description="Completed downloads")
+    failed: int = Field(default=0, description="Failed downloads")
     start_time: datetime = Field(
         default_factory=lambda: datetime.now(tz=ZoneInfo(default_config.timezone)),
-        description="开始时间",
+        description="Start timestamp",
     )
-    end_time: Optional[datetime] = Field(default=None, description="结束时间")
+    end_time: Optional[datetime] = Field(default=None, description="End timestamp")
     papers: Annotated[
-        list[Paper], Field(default_factory=list, description="已下载论文")
+        list[Paper], Field(default_factory=list, description="Downloaded papers")
     ]
     failed_papers: Annotated[
         list[tuple[Paper, Exception]],
-        Field(default_factory=list, description="下载失败的论文"),
+        Field(default_factory=list, description="Failed papers with errors"),
     ]
 
     model_config = {"arbitrary_types_allowed": True}
@@ -178,5 +265,12 @@ class DownloadStats(BaseModel):
 
 @dataclass
 class PageParam:
+    """Page parameters for pagination.
+
+    Attributes:
+        start: Starting index.
+        end: Ending index.
+    """
+
     start: int
     end: int

@@ -179,8 +179,7 @@ class ArxivDownloader:
     def _prepare_paths(
         self, paper: Paper, filename: Optional[str] = None
     ) -> tuple[Path, Path]:
-        """
-        Prepare file paths for downloading a paper.
+        """Prepare file paths for downloading a paper.
 
         Args:
             paper (Paper): The paper object to download.
@@ -195,8 +194,7 @@ class ArxivDownloader:
         return file_path, temp_path
 
     async def _download_to_temp(self, url: str, temp_path: Path) -> None:
-        """
-        Download a file to a temporary location.
+        """Download a file to a temporary location.
 
         Args:
             url (str): The URL to download the file from.
@@ -214,12 +212,11 @@ class ArxivDownloader:
     async def _download_with_context(
         self, paper: Paper, context: DownloadTracker
     ) -> None:
-        """
-        Download a paper with a download context.
+        """Download a paper with a download context.
 
         Args:
-            paper (Paper): The paper object to download.
-            context (DownloadTracker): The download context
+            paper (Paper): Paper instance to be downloaded.
+            context (DownloadTracker): Download tracking context.
         """
         try:
             await self.download_paper(paper, f"{paper.info.id}.pdf")
@@ -227,7 +224,7 @@ class ArxivDownloader:
         except Exception as e:
             context.add_failed(paper, e)
             logger.error(
-                f"论文 {paper.info.id} 下载失败: {e!s}",
+                f"Failed to download paper {paper.info.id}: {e!s}",
                 extra={"paper_id": paper.info.id},
             )
 
@@ -239,37 +236,35 @@ class ArxivDownloader:
     async def download_paper(
         self, paper: Paper, filename: Optional[str] = None
     ) -> None:
-        """
-        Download a single paper.
+        """Download a single paper.
 
         Args:
-            paper (Paper): The paper object to download.
+            paper (Paper): Paper instance to be downloaded.
             filename (Optional[str]): Custom filename for the downloaded paper.
 
         Raises:
-            PaperDownloadException: If the download fails.
+            PaperDownloadException: If the download fails after retries.
         """
         file_path, temp_path = self._prepare_paths(paper, filename)
-        logger.info(f"开始下载论文: {paper.pdf_url}")
+        logger.info(f"Starting paper download: {paper.pdf_url}")
 
         try:
             await self._download_to_temp(str(paper.pdf_url), temp_path)
             temp_path.rename(file_path)
-            logger.info(f"下载完成: {file_path}")
+            logger.info(f"Download completed: {file_path}")
             file_size = file_path.stat().st_size
-            logger.debug(f"文件大小: {file_size / 1024:.1f} KB")
+            logger.debug(f"File size: {file_size / 1024:.1f} KB")
         except Exception as e:
-            logger.error(f"下载失败: {e}")
+            logger.error(f"Download failed: {e}")
             temp_path.unlink(missing_ok=True)
             file_path.unlink(missing_ok=True)
-            raise PaperDownloadException(f"下载失败: {e}") from e
+            raise PaperDownloadException(f"Download failed: {e}") from e
 
     async def batch_download(
         self,
         search_result: SearchResult,
     ) -> DownloadTracker:
-        """
-        Batch download papers from a search result.
+        """Batch download papers from a search result.
 
         Args:
             search_result (SearchResult): The search result object to download papers.
