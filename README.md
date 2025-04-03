@@ -36,10 +36,6 @@ An async Python client for the arXiv API with enhanced performance and flexible 
     <img src="https://img.shields.io/pypi/dm/aioarxiv" alt="pypi">
 </a>
 
-> [!WARNING]
-> This project is currently under development and has not yet reached a stable release. We do not recommend using it in
-> production environments.
-
 ## Features
 
 - Asynchronous API calls for better performance
