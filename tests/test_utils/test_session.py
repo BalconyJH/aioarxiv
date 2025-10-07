@@ -83,7 +83,7 @@ async def test_basic_request(
     await manager.request("GET", "http://example.com")
 
     mock_session.request.assert_called_once()
-    args, kwargs = mock_session.request.call_args
+    args, _kwargs = mock_session.request.call_args
     assert args[0] == "GET"
     assert args[1] == "http://example.com"
 
