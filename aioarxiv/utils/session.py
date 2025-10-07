@@ -1,8 +1,16 @@
+import ssl
 from types import TracebackType
 from typing import Optional
 from typing_extensions import Self
 
-from aiohttp import ClientResponse, ClientSession, ClientTimeout, TraceConfig
+from aiohttp import (
+    ClientResponse,
+    ClientSession,
+    ClientTimeout,
+    TCPConnector,
+    TraceConfig,
+)
+import certifi
 
 from aioarxiv.config import ArxivConfig, default_config
 from aioarxiv.utils import create_trace_config
@@ -100,6 +108,9 @@ class SessionManager:
             self._session = ClientSession(
                 timeout=self._timeout,
                 trace_configs=[self._trace_config],
+                connector=TCPConnector(
+                    ssl=ssl.create_default_context(cafile=certifi.where())
+                ),
             )
         return self._session
 
