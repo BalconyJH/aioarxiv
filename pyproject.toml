@@ -130,31 +130,31 @@ select = [
     "RUF",   # Ruff-specific rules
 ]
 ignore = [
-    "E501",   # 过长的行由 ruff format 处理, 剩余的都是字符串
-    "UP035",  # pyupgrade, 但 typing.Callable 的导入会报错
+    "E501",   # Ruff format handles long lines; the remaining cases are strings.
+    "UP035",  # pyupgrade conflicts with the required typing.Callable import.
     "TRY003",
-    "TRY301",  # 为啥非要把 raise 丢进另外一个 inner fn 里
+    "TRY301",  # Raising inline is clearer than adding a single-use inner function.
     "BLE001",  # except Exception as e
-    "PGH003",  # 要求 `# type: ignore` 提供理由，但 pyright 和 mypy 等都不是统一标准。
-    "PLC0414",  # 用 import-as 表示 re-export
-    "N818",  # 要求所有自定义错误以 Error 作后缀，但我们不这么做
+    "PGH003",  # Type checker ignore syntax is not standardized.
+    "PLC0414",  # Import aliases explicitly mark re-exports.
+    "N818",  # Public exception names do not all use an Error suffix.
     "RET502", # return = return None
-    "RET503",  # 就要 implicit return none
-    "PLC0105",  # 我们已经用 R 表示协变，Q 表示逆变了
-    "PLR0913",  # 参数就那么多的，你用 builder 什么的不是更逆天？
-    "PLR0917",  # 同 PLR0913，位置参数数量属于 API 设计自由
-    "SIM108",  # 迫真 simplicy
-    "RUF009",  # 我不想要额外的全局变量。
-    "RUF003",  # 中文注释里用全角符号怎么你了
-    "SLOT000", # 动态类型需求，主要是 json5 backend
-    "PLR0911", "PLR0912", "PLR0915",  # 复杂度高点怎么你了
-    "PYI041", # int 和 float 在运行时的类型没有交集（互不成立 issubclass）
-    "PLW2901",  # shallow 怎么你了
-    "S101", # assert 怎么你了，非要 RuntimeError 吗
-    "PLR2004",  # magic number 怎么你了
-    "TRY004",  # 我要抛啥错误我清楚
-    "COM812", # 强制尾随逗号
-    "TID252", # 相对导入
+    "RET503",  # Implicit None returns are intentional.
+    "PLC0105",  # R and Q already identify covariant and contravariant variables.
+    "PLR0913",  # Argument counts are part of the public API design.
+    "PLR0917",  # Positional argument counts are part of the public API design.
+    "SIM108",  # Explicit branches remain clearer in the affected cases.
+    "RUF009",  # Avoid introducing extra module-level variables.
+    "RUF003",  # Allow intentional Unicode punctuation in comments.
+    "SLOT000", # Dynamic attributes are required, mainly by the json5 backend.
+    "PLR0911", "PLR0912", "PLR0915",  # Existing control flow is intentionally explicit.
+    "PYI041", # int and float have disjoint runtime types.
+    "PLW2901",  # Reassigning shallow iteration variables is intentional.
+    "S101", # Assertions are appropriate for internal invariants and tests.
+    "PLR2004",  # Numeric constants are sufficiently local and descriptive.
+    "TRY004",  # Exception types are selected deliberately at each call site.
+    "COM812", # Ruff format owns trailing comma style.
+    "TID252", # Relative imports are permitted within the package.
     "ISC001", # format warning
 ]
 flake8-quotes = { inline-quotes = "double", multiline-quotes = "double" }

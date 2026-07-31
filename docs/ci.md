@@ -1,110 +1,133 @@
-# 持续集成
+# Continuous integration
 
-本页描述 `.github/workflows/` 中各条 GitHub Actions 的职责、合并门禁和信任边界。
-发布状态机见[发布与恢复](release.md)，GitHub 远端设置见[仓库治理](governance.md)。
+This page describes the responsibilities, merge gates, and trust boundaries of
+the GitHub Actions workflows in `.github/workflows/`. See
+[Release and recovery](release.md) for the release state machine and
+[Repository governance](governance.md) for remote GitHub settings.
 
-## 工作流总览
+## Workflow overview
 
-| 工作流 | 文件 | 触发条件 | 职责 |
+| Workflow | File | Triggers | Responsibility |
 | --- | --- | --- | --- |
-| CI | `ci.yml` | `main` push、Pull Request、手动 | 格式、lint、类型、打包与 wheel 安装验证 |
-| Coverage | `coverage.yml` | `main` push、Pull Request、手动 | Python 3.10–3.14 测试与覆盖率门槛 |
-| Prek | `prek.yml` | `main` push、Pull Request、手动 | 仓库 hooks 与 GitHub Actions 静态检查 |
-| CodeQL | `codeql.yml` | `main` push、Pull Request、每周 | Python 安全扫描 |
-| Docs | `docs.yml` | 文档输入变更的 `main` push、手动 | 严格构建并更新 `dev` 文档 |
-| Docs PR Preview Build | `docs-pr-preview.yml` | Pull Request | 在只读上下文构建预览 artifact |
-| Docs PR Preview Deploy | `docs-pr-preview-deploy.yml` | 预览构建完成 | 验证并部署静态预览 |
-| Docs PR Preview Cleanup | `docs-pr-preview-cleanup.yml` | Pull Request 关闭 | 删除对应预览 |
-| Auto Tag on Version Change | `auto-tag.yml` | required workflow 完成、手动恢复 | 汇合精确 SHA 门禁并创建版本标签 |
-| Publish | `publish.yml` | Auto Tag dispatch、手动恢复 | 发布 PyPI、GitHub Release 与版本文档 |
-| Publish (TestPyPI) | `publish-test.yml` | 仅手动 | 发布唯一开发版本用于人工验收 |
+| CI | `ci.yml` | `main` push, pull request, manual | Formatting, lint, typing, packaging, and wheel installation |
+| Coverage | `coverage.yml` | `main` push, pull request, manual | Python 3.10–3.14 tests and coverage threshold |
+| Prek | `prek.yml` | `main` push, pull request, manual | Repository hooks and GitHub Actions static analysis |
+| CodeQL | `codeql.yml` | `main` push, pull request, weekly | Python security analysis |
+| Docs | `docs.yml` | Documentation changes on `main`, manual | Strict build and `dev` documentation update |
+| Docs PR Preview Build | `docs-pr-preview.yml` | Pull request | Build a preview artifact in a read-only context |
+| Docs PR Preview Deploy | `docs-pr-preview-deploy.yml` | Preview build completed | Validate and deploy the static preview |
+| Docs PR Preview Cleanup | `docs-pr-preview-cleanup.yml` | Pull request closed | Remove the matching preview |
+| Auto Tag on Version Change | `auto-tag.yml` | Required workflow completed, manual recovery | Aggregate exact-SHA gates and create a version tag |
+| Publish | `publish.yml` | Auto Tag dispatch, manual recovery | Publish to PyPI, create a GitHub Release, and deploy versioned docs |
+| Publish (TestPyPI) | `publish-test.yml` | Manual only | Publish a unique development version for manual acceptance |
 
-所有第三方 Action 均固定到完整 commit SHA；顶层默认权限为空或只读，写权限只授予
-实际需要产生远端状态的 job。Dependabot 每周分别更新 GitHub Actions 与 uv 依赖。
+Every third-party action is pinned to a full commit SHA. Top-level permissions
+are empty or read-only, and write permissions are granted only to jobs that must
+create remote state. Dependabot updates GitHub Actions and uv dependencies
+weekly.
 
-## 合并门禁
+## Merge gates
 
-可导入的 `Protect main` Ruleset 绑定三个稳定的汇总 check：
+The importable `Protect main` ruleset binds three stable aggregate checks:
 
-- `Required Checks`：汇总 CI 内部全部 job；
-- `Coverage Matrix`：要求完整 Python 版本矩阵成功；
-- `Prek`：要求仓库 hooks 和 actionlint 成功。
+- `Required Checks` summarizes every job in CI.
+- `Coverage Matrix` requires the complete Python version matrix to pass.
+- `Prek` requires the repository hooks and actionlint to pass.
 
-汇总 job 使用 `if: always()`，因此内部 job 失败、取消或跳过都不会被误判为成功。
-Ruleset 无需绑定会随 Python 版本或内部任务扩展而变化的矩阵名称。
+Aggregate jobs use `if: always()`, so a failed, cancelled, or skipped internal
+job cannot be mistaken for success. The ruleset does not need to bind matrix job
+names that change when Python versions or internal tasks are added.
 
-### CI 分层
+### CI layers
 
-| job | 验证内容 |
+| Job | Validation |
 | --- | --- |
-| `Ruff` | `ruff format --check` 与 `ruff check` |
+| `Ruff` | `ruff format --check` and `ruff check` |
 | `Ty` | `ty check` |
-| `Basedpyright` | 源码类型检查和 `aioarxiv` 公开类型完备性 |
-| `Package Build` | wheel、sdist 与包元数据 |
-| `Wheel Smoke` | Python 3.10、3.11、3.13、3.14 隔离安装与导入 |
-| `Required Checks` | 汇总以上所有结果 |
+| `Basedpyright` | Source type checking and `aioarxiv` public type completeness |
+| `Package Build` | Wheel, source distribution, and package metadata |
+| `Wheel Smoke` | Isolated installation and import on Python 3.10, 3.11, 3.13, and 3.14 |
+| `Required Checks` | Aggregate all results above |
 
-`Basedpyright` 只在 `Ruff` 成功后启动：格式或 lint 已失败时不会继续占用
-Basedpyright runner。`Ty` 和分发包构建仍与 Ruff 并行，以保留彼此独立的反馈并缩短
-成功路径的总耗时。
+`Basedpyright` starts only after `Ruff` succeeds, avoiding runner use when
+formatting or lint has already failed. `Ty` and the distribution build remain
+parallel with Ruff to preserve independent feedback and minimize the successful
+path's total duration.
 
-Python 3.12 的完整 wheel 与 sdist 隔离安装由构建验证覆盖；其余受支持版本通过 wheel
-smoke 验证运行时依赖和导入边界。对应的本地聚合命令是：
+The package build validates complete isolated wheel and source distribution
+installs on Python 3.12. Wheel smoke tests cover runtime dependencies and import
+boundaries on the other supported versions. The corresponding local aggregate
+commands are:
 
 ```bash
 make check
 make build-artifacts
 ```
 
-## 覆盖率
+## Coverage
 
-Coverage 对 Python 3.10–3.14 分别运行测试，单个矩阵项必须达到 75% 项目覆盖率。
-测试日志与 XML 报告无论成功或失败都会作为 artifact 保留 14 天。
+Coverage runs the test suite separately on Python 3.10–3.14. Every matrix entry
+must reach 75% project coverage. Test logs and XML reports are retained as
+artifacts for 14 days regardless of success or failure.
 
-Codecov 上传不属于正确性门禁：仓库可以配置 `CODECOV_TOKEN`，也可以尝试无 token
-上传；外部服务故障不会覆盖 pytest 与覆盖率门槛的真实结果。
+Codecov upload is not a correctness gate. The repository can provide
+`CODECOV_TOKEN` or attempt a tokenless upload; an external service failure
+cannot override the pytest and coverage results.
 
-## 文档构建与 PR 预览 { #docs-preview }
+## Documentation builds and pull request previews { #docs-preview }
 
-文档相关 Pull Request 采用构建与部署分离的两段式信任模型：
+Documentation pull requests use a two-stage trust model that separates building
+from deployment:
 
-1. `Docs PR Preview Build` 在 PR 的只读 token 上下文执行不受信任代码，只上传
-   生成后的 `site/` artifact。
-2. `Docs PR Preview Deploy` 由默认分支中的 `workflow_run` 定义运行。它重新解析当前
-   Pull Request，要求上游 run、PR、head SHA 一致，并拒绝过期或歧义关联。
-3. 部署前只接受普通文件和目录，拒绝符号链接与其他文件类型，并限制 artifact
-   为最多 10000 个文件、100 MiB。
-4. 受信任 job 只把验证后的静态内容写入 `gh-pages/pr-preview/pr-<number>/`，
-   不 checkout PR 分支，也不执行 artifact 中的程序。
-5. Pull Request 关闭后，cleanup workflow 删除固定编号的预览路径并更新评论。
+1. `Docs PR Preview Build` executes untrusted code with a read-only pull request
+   token and uploads only the resulting `site/` artifact.
+2. `Docs PR Preview Deploy` runs from the default branch's `workflow_run`
+   definition. It resolves the current pull request again, requires the upstream
+   run, pull request, and head SHA to agree, and rejects stale or ambiguous
+   associations.
+3. Before deployment, it accepts only regular files and directories, rejects
+   symbolic links and other file types, and limits the artifact to 10,000 files
+   and 100 MiB.
+4. The trusted job writes only validated static content to
+   `gh-pages/pr-preview/pr-<number>/`. It neither checks out the pull request
+   branch nor executes programs from the artifact.
+5. After the pull request closes, the cleanup workflow removes the numbered
+   preview path and updates the comment.
 
-!!! warning "Pages origin 不是安全隔离边界"
+!!! warning "The Pages origin is not a security boundary"
 
-    PR 预览与正式文档共用 `https://balconyjh.github.io` origin。公开 fork 可以控制
-    预览 HTML/JavaScript，因此该 origin 不得保存 secret、token 或被正式页面信任的
-    浏览器状态。评审预览时建议使用不含敏感登录状态的浏览器 profile。
+    Pull request previews and production documentation share the
+    `https://balconyjh.github.io` origin. Public forks can control preview HTML
+    and JavaScript, so that origin must not store secrets, tokens, or browser
+    state trusted by production pages. Review previews with a browser profile
+    that contains no sensitive authenticated state.
 
-`Docs` 对文档输入使用路径过滤，只在需要时严格构建并把滚动版本部署为 `dev`。
-由于它不会为每个 `main` SHA 产生 run，Auto Tag 的精确 SHA 门禁只汇合始终运行的
-CI、Coverage 和 Prek；发布 workflow 会从已验证标签再次严格构建版本文档。
+`Docs` applies path filtering to documentation inputs, running a strict build
+and deploying the rolling `dev` version only when needed. Because it does not
+produce a run for every `main` SHA, Auto Tag's exact-SHA gate aggregates only
+the always-running CI, Coverage, and Prek workflows. The publish workflow builds
+versioned documentation strictly again from the verified tag.
 
-## 并发与精确 SHA
+## Concurrency and exact SHAs
 
-Pull Request 更新会取消同一 PR 的过期 CI、Coverage、Prek 和预览构建。`main`
-push 则以 commit SHA 作为并发键，不会因后续提交到达而取消，因为 Auto Tag 必须
-汇合同一 source SHA 的完整结果。
+Pull request updates cancel stale CI, Coverage, Prek, and preview builds for the
+same pull request. A `main` push instead uses its commit SHA as the concurrency
+key and is not cancelled by later commits, because Auto Tag must aggregate the
+complete result for one source SHA.
 
-Auto Tag 的多个 `workflow_run` 事件按 source SHA 串行化。每次事件都会通过 GitHub
-API 查询同一 SHA 的三条 required workflow；只有全部处于
-`completed/success` 才进入版本检测。后续发布不依赖“当前最新 run”或移动中的
-`main`，而只依赖已经确定的 commit 与标签。
+Auto Tag serializes multiple `workflow_run` events by source SHA. Each event
+queries the GitHub API for all three required workflows on that SHA and proceeds
+to version detection only when every result is `completed/success`. Publishing
+thereafter depends on the resolved commit and tag, not the "latest run" or a
+moving `main`.
 
-## 诊断
+## Diagnostics
 
-手动触发 CI、Coverage 或 Docs 时可启用 `debug_enabled`，输出 runner 或依赖快照。
-失败日志、覆盖率报告、构建日志及分发包会以短期 artifact 保存。
+Manual CI, Coverage, and Docs runs can enable `debug_enabled` to emit runner or
+dependency snapshots. Failure logs, coverage reports, build logs, and
+distributions are retained as short-lived artifacts.
 
-本地检查 workflow：
+Validate workflows locally with:
 
 ```bash
 uv tool run prek run check-github-workflows --all-files

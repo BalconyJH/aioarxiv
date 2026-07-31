@@ -1,94 +1,113 @@
-# 发布与恢复
+# Release and recovery
 
-aioarxiv 使用版本提交、不可变标签和受限权限 job 组成发布状态机。正常发布不监听
-任意 tag push；只有精确 SHA 门禁通过后的 Auto Tag dispatch，或维护者显式执行的
-恢复操作，才能启动 `Publish`。
+aioarxiv uses version commits, immutable tags, and least-privilege jobs as a
+release state machine. Normal publishing does not listen to arbitrary tag
+pushes. `Publish` starts only from an Auto Tag dispatch after exact-SHA gates
+pass, or from an explicit maintainer recovery action.
 
-## 发布不变量
+## Release invariants
 
-正式发布必须同时满足：
+A production release must satisfy all of these conditions:
 
-- source commit 位于 `main` 历史中；
-- `project.version` 是规范的 PEP 440 版本且不包含 local segment；
-- 标签严格等于 `v<project.version>`，并指向 source commit；
-- `uv.lock` 与项目元数据一致；
-- PyPI、GitHub Release 使用同一批已经验证的 wheel 与 sdist；
-- `refs/tags/v*` 不允许删除或移动。
+- The source commit is in the history of `main`.
+- `project.version` is a canonical PEP 440 version without a local segment.
+- The tag is exactly `v<project.version>` and points to the source commit.
+- `uv.lock` agrees with project metadata.
+- PyPI and the GitHub Release use the same verified wheel and source
+  distribution.
+- References matching `refs/tags/v*` cannot be deleted or moved.
 
-## 正常发布
+## Normal release
 
-1. 创建只包含发布准备与版本提升的 Pull Request，并更新
-   `pyproject.toml` 与 `uv.lock`。
-2. 合入 `main` 后，CI、Coverage 和 Prek 为该 source SHA 完整运行。
-3. 任一 required workflow 完成都会唤醒 Auto Tag。它通过 API 汇合同一 SHA
-   的三条结果，而不是信任触发自己的单条 run。
-4. Auto Tag 验证 source 仍位于 `main`，比较第一父提交与当前
-   `project.version`；正常路径要求版本严格递增。
-5. 在创建标签前构建 wheel 与 sdist，执行 Twine、archive 内容及隔离安装验证。
-6. 创建带注释的 `v<version>` 标签并显式 dispatch `Publish`。
-7. Publish 从标签重新 checkout 和构建，不复用 Auto Tag runner 中的临时文件。
-8. `publish-pypi` 仅获得 `id-token: write`，通过 `release` environment 的
-   Trusted Publisher 上传 PyPI。
-9. `verify-pypi` 从 PyPI JSON 读取文件名与 SHA-256，要求远端文件集合和本次
-   artifact 完全一致。
-10. 远端分发包验证完成后才创建 GitHub Release，并附加同一批 artifact。
-11. 最后从已验证标签严格构建版本文档，部署到 `/<version>/`；若该版本不早于
-    当前最新文档，同时更新 `latest`。
+1. Open a pull request containing only release preparation and a version bump,
+   updating `pyproject.toml` and `uv.lock`.
+2. After it reaches `main`, CI, Coverage, and Prek run completely for that source
+   SHA.
+3. Completion of any required workflow wakes Auto Tag. It queries the API and
+   aggregates all three results for the same SHA instead of trusting only the run
+   that triggered it.
+4. Auto Tag verifies that the source remains on `main` and compares
+   `project.version` with the first parent. The normal path requires a strict
+   version increase.
+5. Before creating a tag, it builds the wheel and source distribution and
+   validates Twine metadata, archive contents, and isolated installations.
+6. It creates an annotated `v<version>` tag and explicitly dispatches `Publish`.
+7. Publish checks out and rebuilds from the tag instead of reusing temporary
+   files from the Auto Tag runner.
+8. `publish-pypi` receives only `id-token: write` and uploads through the
+   `release` environment's Trusted Publisher.
+9. `verify-pypi` reads filenames and SHA-256 values from PyPI JSON and requires
+   the remote file set to match the current artifacts exactly.
+10. Only after remote distribution verification does the workflow create a
+    GitHub Release and attach the same artifacts.
+11. Finally, it strictly builds versioned documentation from the verified tag and
+    deploys it to `/<version>/`. If that version is not older than the current
+    documentation, it also updates `latest`.
 
-构建 job 不持有 PyPI OIDC 或仓库写权限，PyPI job 不持有 GitHub Release 权限，
-GitHub Release job 也不持有 PyPI 凭据。artifact 是这些权限边界之间唯一的分发包
-传递方式。
+Build jobs have neither PyPI OIDC nor repository write access. The PyPI job has
+no GitHub Release permission, and the GitHub Release job has no PyPI
+credentials. Artifacts are the only mechanism for transferring distributions
+between these permission boundaries.
 
-## TestPyPI 预演
+## TestPyPI rehearsal
 
-`Publish (TestPyPI)` 仅供维护者手动触发，不属于 Pull Request 门禁。它在当前项目
-版本后添加基于 UTC 时间与 workflow run 的唯一 `.dev` 后缀，构建并完成正式发布
-同等级别的分发包验证，再通过 `testpypi` environment 的 Trusted Publisher 上传。
+`Publish (TestPyPI)` is a maintainer-only manual workflow and is not a pull
+request gate. It adds a unique `.dev` suffix based on UTC time and the workflow
+run to the current project version, builds and validates distributions to the
+same standard as production, and uploads through the `testpypi` environment's
+Trusted Publisher.
 
-TestPyPI 用于人工检查安装、依赖和元数据，不能替代正式发布的 source、tag、版本
-与 PyPI 哈希不变量。
+TestPyPI supports manual inspection of installation, dependencies, and metadata.
+It does not replace the production source, tag, version, and PyPI hash
+invariants.
 
-## 恢复路径
+## Recovery paths
 
-| 失败位置 | 恢复方式 |
+| Failure | Recovery |
 | --- | --- |
-| required workflow 失败 | 修复后通过新的 Pull Request；不要手工打标签 |
-| Auto Tag 的分发包 preflight 失败，尚未创建标签 | 修复基础设施并等待当前 `main` SHA 的三条门禁成功；从默认分支手动运行 Auto Tag，输入该完整 `source_sha` |
-| 标签已经创建，但 Publish 未启动或失败 | 从默认分支或同名标签手动运行 Publish，输入现有 `release_tag` |
-| PyPI 已上传，GitHub Release 或文档失败 | 对同一标签重跑 Publish；`skip-existing` 与远端哈希校验会确认已发布字节 |
-| TestPyPI 失败 | 修复后重新手动运行；每次都会得到新的唯一 dev version |
+| A required workflow fails | Fix it in a new pull request; do not create a tag manually |
+| Auto Tag distribution preflight fails before tag creation | Fix the infrastructure and wait for all three gates on the current `main` SHA; manually run Auto Tag from the default branch with the complete `source_sha` |
+| The tag exists, but Publish did not start or failed | Manually run Publish from the default branch or matching tag with the existing `release_tag` |
+| PyPI upload succeeded, but the GitHub Release or documentation failed | Rerun Publish for the same tag; `skip-existing` and remote hash verification confirm the published bytes |
+| TestPyPI fails | Fix the problem and run it manually again; every run receives a new unique development version |
 
-### 标签前恢复
+### Recovery before tag creation
 
-Auto Tag 的手动入口不是任意 commit 发布器。它要求：
+Auto Tag's manual entry point is not an arbitrary commit publisher. It requires:
 
-- `source_sha` 是完整的小写 40 位 commit SHA；
-- workflow definition 从默认分支运行；
-- source 等于当前 `main` tip；
-- 同一 source SHA 的 CI、Coverage、Prek 均成功；
-- 当前版本不得低于第一父提交；
-- 目标版本标签尚不存在；
-- 再次完成完整分发包 preflight 后才创建标签。
+- `source_sha` to be a complete lowercase 40-character commit SHA;
+- the workflow definition to run from the default branch;
+- the source to equal the current `main` tip;
+- CI, Coverage, and Prek to have succeeded for that source SHA;
+- the current version not to be lower than its first parent's version;
+- the target version tag not to exist; and
+- the complete distribution preflight to pass again before tag creation.
 
-标签前失败通常会在后续修复提交上表现为“当前版本与第一父提交相同”；恢复模式只为
-这个场景允许相等版本。它不能用于回溯发布历史 commit，也不能覆盖已有标签。
+A failure before tag creation commonly leaves a later repair commit with the
+same version as its first parent. Recovery mode permits equality only for this
+case. It cannot publish an older historical commit or replace an existing tag.
 
-### 标签后恢复
+### Recovery after tag creation
 
-手动运行 Publish 时，workflow ref 必须是默认分支或与输入一致的标签。Publish
-仍会重新检查标签格式、`main` ancestry、标签指向、项目版本、lockfile、构建结果及
-PyPI 哈希；手动触发不会绕过发布不变量。
+When Publish is run manually, the workflow ref must be the default branch or the
+tag matching the input. Publish still rechecks tag format, `main` ancestry, tag
+target, project version, lockfile, build results, and PyPI hashes. Manual
+dispatch does not bypass release invariants.
 
-!!! danger "不得移动已发布标签"
+!!! danger "Never move a published tag"
 
-    不要通过删除标签、force push 标签或重发同一版本处理部分失败。标签和 PyPI
-    文件是不可变发布边界；恢复只能补齐后续状态，不能改变已经发布的字节。
+    Do not handle a partial failure by deleting or force-pushing a tag, or by
+    republishing the same version. Tags and PyPI files are immutable release
+    boundaries. Recovery can complete later state but cannot change published
+    bytes.
 
-## 文档版本
+## Documentation versions
 
-`main` 上的文档变更更新滚动的 `dev` 版本。正式发布从标签生成固定版本目录；
-`latest` 只在目标版本不早于当前已部署最新版本时更新，因此补发旧版本不会把默认
-文档回退。
+Documentation changes on `main` update the rolling `dev` version. Production
+releases create a fixed version directory from the tag. `latest` is updated only
+when the target version is not older than the currently deployed version, so
+recovering an older release cannot roll back the default documentation.
 
-Pages 部署位于软件发布链末端。若它失败，已经验证的 PyPI 和 GitHub Release 保持
-有效；对同一标签重跑 Publish 即可补齐文档，无需发布新软件版本。
+Pages deployment is the final stage of the software release chain. If it fails,
+the verified PyPI files and GitHub Release remain valid. Rerun Publish for the
+same tag to complete the documentation without releasing a new software version.

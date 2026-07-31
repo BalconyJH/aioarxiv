@@ -1,99 +1,116 @@
-# 仓库治理
+# Repository governance
 
-workflow 和 Ruleset JSON 只能描述期望契约，不能自动修改 GitHub、PyPI 或 TestPyPI
-的远端设置。管理员必须显式配置并定期审计本页列出的保护。
+Workflow and ruleset JSON files describe the intended contract but cannot
+modify remote GitHub, PyPI, or TestPyPI settings automatically. Administrators
+must configure and periodically audit the protections described here.
 
-## 分支与标签
+## Branches and tags
 
-仓库提供两份可导入配置：
+The repository provides two importable definitions:
 
 - `.github/rulesets/protect-main.json`
 - `.github/rulesets/protect-release-tags.json`
 
-在 `Settings > Rules > Rulesets > Import a ruleset` 中依次导入并检查目标后启用。
+Import them from `Settings > Rules > Rulesets > Import a ruleset`, review each
+target, and then enable the ruleset.
 
-`Protect main` 的基线为：
+The `Protect main` baseline:
 
-- 禁止删除与非快进更新默认分支；
-- 要求线性历史；
-- 只允许 squash merge；
-- 至少一次批准，推送新提交后撤销旧批准；
-- 要求 review thread 全部解决；
-- 要求分支为最新；
-- 要求 `Required Checks`、`Coverage Matrix`、`Prek` 成功；
-- 不配置日常 bypass。
+- blocks deletion and non-fast-forward updates of the default branch;
+- requires linear history;
+- permits squash merges only;
+- requires at least one approval and dismisses stale approvals after new pushes;
+- requires every review thread to be resolved;
+- requires the branch to be up to date;
+- requires `Required Checks`, `Coverage Matrix`, and `Prek` to pass; and
+- defines no routine bypass.
 
-`Protect release tags` 匹配 `refs/tags/v*`，禁止删除和非快进更新，但允许 Auto Tag
-创建新标签。修改 workflow 汇总 job 名称时，先让远端至少观察到一次新的 check
-context，再同步更新并重新导入 Ruleset，避免门禁永久等待不存在的名称。
+`Protect release tags` matches `refs/tags/v*` and blocks deletion and
+non-fast-forward updates while allowing Auto Tag to create new tags. When
+renaming an aggregate workflow job, first let GitHub observe the new check
+context, then update and re-import the ruleset. This prevents the gate from
+waiting indefinitely for a nonexistent check.
 
-## Deployment environment 与 Trusted Publisher
+## Deployment environments and Trusted Publishers
 
-Ruleset 保护 Git 引用，deployment environment 保护不可逆的包发布权限，两者不能
-互相替代。
+Rulesets protect Git references, while deployment environments protect
+irreversible package publishing privileges. Neither replaces the other.
 
-| GitHub environment | Workflow | 远端 Trusted Publisher |
+| GitHub environment | Workflow | Remote Trusted Publisher |
 | --- | --- | --- |
-| `release` | `.github/workflows/publish.yml` | PyPI 项目 `aioarxiv` |
-| `testpypi` | `.github/workflows/publish-test.yml` | TestPyPI 项目 `aioarxiv` |
+| `release` | `.github/workflows/publish.yml` | PyPI project `aioarxiv` |
+| `testpypi` | `.github/workflows/publish-test.yml` | TestPyPI project `aioarxiv` |
 
-两处 Trusted Publisher 均应配置：
+Configure both Trusted Publishers with:
 
-- owner：`BalconyJH`
-- repository：`aioarxiv`
-- workflow filename：分别为 `publish.yml`、`publish-test.yml`
-- environment name：分别为 `release`、`testpypi`
+- owner: `BalconyJH`
+- repository: `aioarxiv`
+- workflow filename: `publish.yml` or `publish-test.yml`, respectively
+- environment name: `release` or `testpypi`, respectively
 
-不要保存长期 PyPI API token。workflow 只在实际上传的 job 中请求
-`id-token: write`，由 environment 与 Trusted Publisher 共同限定 OIDC 身份。
-`release` 应只接受版本标签的正常发布和默认分支上的人工恢复；feature branch
-不能取得正式发布权限。
+Do not store long-lived PyPI API tokens. A workflow requests `id-token: write`
+only in the job that uploads a package, with the environment and Trusted
+Publisher jointly restricting its OIDC identity. The `release` environment
+should accept only normal publishing from version tags and manual recovery from
+the default branch. Feature branches must not obtain production publishing
+access.
 
 ## GitHub Pages
 
-在 `Settings > Pages` 中选择从 `gh-pages` 分支根目录部署。该分支完全由 workflow
-维护，不属于源码，不应接受人工编辑或 force push。
+In `Settings > Pages`, deploy from the root of the `gh-pages` branch. Workflows
+manage this branch completely; it is not source code and must not receive manual
+edits or force pushes.
 
-Pages 同时包含：
+Pages contains:
 
-- `dev/`：`main` 文档变更的滚动版本；
-- `<version>/` 与 `latest/`：正式发布文档；
-- `pr-preview/pr-<number>/`：Pull Request 临时预览。
+- `dev/`: the rolling documentation for changes on `main`;
+- `<version>/` and `latest/`: production release documentation; and
+- `pr-preview/pr-<number>/`: temporary pull request previews.
 
-这些路径共用同一个 origin，并不提供浏览器安全隔离。不要在 Pages origin 保存
-secret、token 或可信浏览器状态；详细风险见[持续集成](ci.md#docs-preview)。
+These paths share one origin and provide no browser security isolation. Do not
+store secrets, tokens, or trusted browser state on the Pages origin. See
+[Continuous integration](ci.md#docs-preview) for the detailed risk model.
 
 ## Codecov
 
-`CODECOV_TOKEN` 是可选的 repository secret。未配置时 workflow 会尝试无 token
-上传；上传失败不会破坏 pytest 与覆盖率门禁。若项目设置为私有或 Codecov 要求
-认证，再创建该 secret，不要把 token 写入 workflow 或仓库文件。
+`CODECOV_TOKEN` is an optional repository secret. Without it, the workflow
+attempts a tokenless upload. Upload failure does not override the pytest and
+coverage gates. Create the secret only if the project becomes private or
+Codecov requires authentication, and never store the token in workflow or
+repository files.
 
-## 初次启用顺序
+## Initial setup order
 
-1. 合入 workflow，让 GitHub 至少观察到一次 `Required Checks`、
-   `Coverage Matrix` 和 `Prek`。
-2. 配置 `release`、`testpypi` environment。
-3. 在 PyPI 与 TestPyPI 创建对应 Trusted Publisher。
-4. 配置 Pages 从 `gh-pages` 分支根目录部署。
-5. 导入并启用 `Protect main`。
-6. 导入并启用 `Protect release tags`。
-7. 使用非版本变更 Pull Request 验证合并门禁与文档预览。
-8. 手动运行 TestPyPI workflow 验证 OIDC、构建和安装。
-9. 最后通过正常版本 Pull Request 验证完整发布链。
+1. Merge the workflows so GitHub observes `Required Checks`, `Coverage Matrix`,
+   and `Prek` at least once.
+2. Configure the `release` and `testpypi` environments.
+3. Create the corresponding Trusted Publishers on PyPI and TestPyPI.
+4. Configure Pages to deploy from the root of `gh-pages`.
+5. Import and enable `Protect main`.
+6. Import and enable `Protect release tags`.
+7. Use a non-version-changing pull request to verify merge gates and the
+   documentation preview.
+8. Run the TestPyPI workflow manually to verify OIDC, builds, and installation.
+9. Finally, verify the full release chain with a normal version pull request.
 
-不得使用真实 `v*` 标签测试删除或移动保护。标签不可变规则应通过 Ruleset 配置审计
-和一次正常自动发布确认。
+Do not test deletion or movement protection with a real `v*` tag. Audit tag
+immutability through the ruleset configuration and confirm it with one normal
+automated release.
 
-## 审计清单
+## Audit checklist
 
-每次修改 Actions、job 名称、environment 或发布权限后检查：
+After changing Actions, job names, environments, or publishing permissions,
+verify that:
 
-- `main` Ruleset 是否仍绑定三个实际存在的汇总 context；
-- `v*` 标签 Ruleset 是否为 Active 且没有日常 bypass；
-- PyPI/TestPyPI Trusted Publisher 的仓库、workflow、environment 是否精确匹配；
-- Pages source 是否仍为 `gh-pages` 根目录；
-- workflow 的第三方 Action 是否固定到完整 SHA；
-- 顶层权限是否保持空或只读，写权限是否只存在于最小 job；
-- feature/fork Pull Request 是否无法取得写权限或发布 OIDC；
-- `make check`、`make build-artifacts`、`make docs-build` 与 workflow 静态检查是否通过。
+- the `main` ruleset still binds all three existing aggregate contexts;
+- the `v*` tag ruleset is active and has no routine bypass;
+- each PyPI/TestPyPI Trusted Publisher exactly matches its repository, workflow,
+  and environment;
+- the Pages source remains the root of `gh-pages`;
+- every third-party workflow action is pinned to a full SHA;
+- top-level permissions remain empty or read-only, and write permission exists
+  only on the smallest necessary job;
+- feature and fork pull requests cannot obtain write access or publishing OIDC;
+  and
+- `make check`, `make build-artifacts`, `make docs-build`, and workflow static
+  analysis all pass.

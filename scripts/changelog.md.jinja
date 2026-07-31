@@ -1,33 +1,19 @@
 {#- macro: render_commit -#}
 {%- macro render_commit(commit) -%}
 - {{ commit.convention.subject|default(commit.subject) }}
-  （[{{ commit.hash|truncate(7, True, '') }}]({{ jinja_context.project_url }}/commit/{{ commit.hash }})，
-  {{ commit.author_name }}）。
+  ([{{ commit.hash|truncate(7, True, '') }}]({{ jinja_context.project_url }}/commit/{{ commit.hash }}),
+  {{ commit.author_name }}).
 {%- if commit.text_refs.issues_not_in_subject -%}
-关联 Issue/PR：{% for issue in commit.text_refs.issues_not_in_subject -%}
-[{{ issue.ref }}]({{ issue.url }}){% if not loop.last %}、{% endif -%}
+{{ " Related issues and pull requests: " -}}
+{% for issue in commit.text_refs.issues_not_in_subject -%}
+[{{ issue.ref }}]({{ issue.url }}){% if not loop.last %}, {% endif -%}
 {%- endfor -%}
 {%- endif -%}
 {%- endmacro -%}
 
 {#- macro: render_section -#}
 {%- macro render_section(section, is_last) -%}
-{%- set section_names = {
-  "Features": "新增功能",
-  "Bug Fixes": "问题修复",
-  "Reverts": "回退",
-  "Code Refactoring": "代码重构",
-  "Performance Improvements": "性能改进",
-  "Build": "构建",
-  "Chore": "维护",
-  "Continuous Integration": "持续集成",
-  "Dependencies": "依赖",
-  "Docs": "文档",
-  "Style": "格式",
-  "Tests": "测试",
-  "Misc": "其他",
-} -%}
-### {{ section_names.get(section.type or "Misc", section.type or "其他") }}
+### {{ section.type or "Miscellaneous" }}
 
 {% for commit in section.commits|sort(attribute="author_date", reverse=true)|unique(attribute="subject") -%}
 {{ render_commit(commit) }}{% if not loop.last %}
@@ -37,17 +23,17 @@
 {% endmacro -%}
 
 {#- template -#}
-# 更新日志
+# Changelog
 
-本页由 `git-changelog` 根据 Git 提交记录生成。历史版本的完整发布信息仍可在
-[GitHub Releases]({{ jinja_context.project_url }}/releases) 和
-[PyPI]({{ jinja_context.pypi_url }}) 查看。
+This page is generated from the Git history with `git-changelog`. Complete release
+details remain available on [GitHub Releases]({{ jinja_context.project_url }}/releases)
+and [PyPI]({{ jinja_context.pypi_url }}).
 
 <!-- insertion marker -->
 {%- set version = changelog.versions_list[0] %}
 ## [{{ jinja_context.release_tag }}]({{ jinja_context.project_url }}/releases/tag/{{ jinja_context.release_tag }}) - {{ version.date }}
 
-<small>[与 {{ jinja_context.previous_tag }} 比较]({{ jinja_context.project_url }}/compare/{{ jinja_context.previous_tag }}...{{ jinja_context.release_tag }})</small>
+<small>[Compare with {{ jinja_context.previous_tag }}]({{ jinja_context.project_url }}/compare/{{ jinja_context.previous_tag }}...{{ jinja_context.release_tag }})</small>
 
 {% set section_types = changelog.sections|select("in", version.sections_dict)|list -%}
 {% for type in section_types -%}
