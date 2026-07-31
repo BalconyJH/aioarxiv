@@ -433,13 +433,19 @@ jobs:
           from pathlib import Path
           import sys
 
-          from packaging.version import Version
+          from packaging.version import InvalidVersion, Version
 
           target = Version(sys.argv[1])
-          deployed = [
-              Version(item["version"])
-              for item in json.loads(Path(sys.argv[2]).read_text())
-          ]
+          deployed = []
+          for item in json.loads(Path(sys.argv[2]).read_text()):
+              raw_version = item.get("version")
+              try:
+                  deployed.append(Version(raw_version))
+              except (InvalidVersion, TypeError):
+                  print(
+                      f"Ignoring non-release docs version {raw_version!r}.",
+                      file=sys.stderr,
+                  )
           newest = max(deployed) if deployed else None
           should_update = newest is None or target >= newest
           print(
