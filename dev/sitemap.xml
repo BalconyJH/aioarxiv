@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+      <url>
+        <loc>https://balconyjh.github.io/aioarxiv/dev/</loc>
+      </url>
+      <url>
+        <loc>https://balconyjh.github.io/aioarxiv/dev/usage/</loc>
+      </url>
+      <url>
+        <loc>https://balconyjh.github.io/aioarxiv/dev/configuration/</loc>
+      </url>
+      <url>
+        <loc>https://balconyjh.github.io/aioarxiv/dev/api/</loc>
+      </url>
+      <url>
+        <loc>https://balconyjh.github.io/aioarxiv/dev/contributing/</loc>
+      </url>
+      <url>
+        <loc>https://balconyjh.github.io/aioarxiv/dev/ci/</loc>
+      </url>
+      <url>
+        <loc>https://balconyjh.github.io/aioarxiv/dev/release/</loc>
+      </url>
+      <url>
+        <loc>https://balconyjh.github.io/aioarxiv/dev/governance/</loc>
+      </url>
+      <url>
+        <loc>https://balconyjh.github.io/aioarxiv/dev/faq/</loc>
+      </url>
+      <url>
+        <loc>https://balconyjh.github.io/aioarxiv/dev/changelog/</loc>
+      </url>
+</urlset>
