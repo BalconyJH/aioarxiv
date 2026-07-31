@@ -1,8 +1,6 @@
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
-import re
-from typing import Annotated, Optional
 import uuid
 from zoneinfo import ZoneInfo
 
@@ -13,11 +11,9 @@ from pydantic import (
     Field,
     HttpUrl,
     computed_field,
-    field_validator,
 )
-from yarl import URL
 
-from aioarxiv.config import default_config
+from aioarxiv.utils.log import ConfigManager
 
 
 class SortCriterion(str, Enum):
@@ -44,8 +40,8 @@ class Author(BaseModel):
     """
 
     name: str = Field(description="Author's name")
-    affiliation: Optional[str] = Field(
-        None, description="Author's institutional affiliation"
+    affiliation: str | None = Field(
+        default=None, description="Author's institutional affiliation"
     )
 
 
@@ -59,8 +55,8 @@ class PrimaryCategory(BaseModel):
     """
 
     term: str = Field(description="Category identifier")
-    scheme: Optional[AnyUrl] = Field(None, description="Classification system URI")
-    label: Optional[str] = Field(None, description="Category label")
+    scheme: AnyUrl | None = Field(default=None, description="Classification system URI")
+    label: str | None = Field(default=None, description="Category label")
 
 
 class Category(BaseModel):
@@ -109,33 +105,10 @@ class Paper(BaseModel):
     """
 
     info: BasicInfo = Field(description="Basic information")
-    doi: Optional[str] = Field(None, description="DOI (must match regex pattern)")
-    journal_ref: Optional[str] = Field(None, description="Journal reference")
-    pdf_url: Optional[HttpUrl] = Field(None, description="PDF download URL")
-    comment: Optional[str] = Field(None, description="Author comments or notes")
-
-    @field_validator("doi")
-    @classmethod
-    def validate_doi(cls, v: Optional[str]) -> Optional[str]:
-        """Validate DOI format.
-
-        Args:
-            v: DOI string to validate.
-
-        Returns:
-            The validated DOI string.
-
-        Raises:
-            ValueError: If DOI format is invalid.
-        """
-        if v is None:
-            return v
-
-        pattern = r"^10\.\d{4,9}/[-._;()/:a-zA-Z0-9]+$"
-        if not re.match(pattern, v):
-            msg = "Invalid DOI format. Must match pattern: 10.XXXX/suffix"
-            raise ValueError(msg)
-        return v
+    doi: str | None = Field(default=None, description="DOI as provided by arXiv")
+    journal_ref: str | None = Field(default=None, description="Journal reference")
+    pdf_url: HttpUrl | None = Field(default=None, description="PDF download URL")
+    comment: str | None = Field(default=None, description="Author comments or notes")
 
 
 class SearchParams(BaseModel):
@@ -150,14 +123,14 @@ class SearchParams(BaseModel):
         sort_order: Sort direction.
     """
 
-    query: Optional[str] = Field(None, description="Search keywords")
-    id_list: Optional[list[str]] = Field(
-        None, description="Specific arXiv IDs to search"
+    query: str | None = Field(default=None, description="Search keywords")
+    id_list: list[str] | None = Field(
+        default=None, description="Specific arXiv IDs to search"
     )
-    start: Optional[int] = Field(default=0, ge=0, description="Starting index")
-    max_results: Optional[int] = Field(default=10, gt=0, description="Maximum results")
-    sort_by: Optional[SortCriterion] = Field(None, description="Sort criterion")
-    sort_order: Optional[SortOrder] = Field(None, description="Sort direction")
+    start: int | None = Field(default=0, ge=0, description="Starting index")
+    max_results: int | None = Field(default=10, gt=0, description="Maximum results")
+    sort_by: SortCriterion | None = Field(default=None, description="Sort criterion")
+    sort_order: SortOrder | None = Field(default=None, description="Sort direction")
 
 
 class Metadata(BaseModel):
@@ -172,18 +145,18 @@ class Metadata(BaseModel):
     """
 
     start_time: datetime = Field(
-        default_factory=lambda: datetime.now(tz=ZoneInfo(default_config.timezone)),
+        default_factory=lambda: datetime.now(
+            tz=ZoneInfo(ConfigManager.get_config().timezone)
+        ),
         description="Request creation timestamp",
     )
-    end_time: Optional[datetime] = Field(
-        None,
+    end_time: datetime | None = Field(
+        default=None,
         description="Request completion timestamp",
     )
     missing_results: int = Field(description="Missing results count")
     pagesize: int = Field(description="Results per page")
-    source: URL = Field(description="Data source URL")
-
-    model_config = {"arbitrary_types_allowed": True}
+    source: str = Field(description="Data source URL")
 
     @computed_field
     def duration_seconds(self) -> float:
@@ -215,7 +188,7 @@ class SearchResult(BaseModel):
     """
 
     id: UUID4 = Field(
-        default_factory=lambda: uuid.uuid4(),
+        default_factory=uuid.uuid4,
         description="Result UUID",
     )
     papers: list[Paper] = Field(description="Paper results")
@@ -229,38 +202,6 @@ class SearchResult(BaseModel):
     def papers_count(self) -> int:
         """Get the number of papers in the result."""
         return len(self.papers)
-
-
-class DownloadStats(BaseModel):
-    """Download statistics model.
-
-    Attributes:
-        total: Total number of downloads.
-        completed: Number of completed downloads.
-        failed: Number of failed downloads.
-        start_time: Download start timestamp.
-        end_time: Download completion timestamp.
-        papers: List of successfully downloaded papers.
-        failed_papers: List of papers that failed to download with errors.
-    """
-
-    total: int = Field(description="Total downloads")
-    completed: int = Field(default=0, description="Completed downloads")
-    failed: int = Field(default=0, description="Failed downloads")
-    start_time: datetime = Field(
-        default_factory=lambda: datetime.now(tz=ZoneInfo(default_config.timezone)),
-        description="Start timestamp",
-    )
-    end_time: Optional[datetime] = Field(default=None, description="End timestamp")
-    papers: Annotated[
-        list[Paper], Field(default_factory=list, description="Downloaded papers")
-    ]
-    failed_papers: Annotated[
-        list[tuple[Paper, Exception]],
-        Field(default_factory=list, description="Failed papers with errors"),
-    ]
-
-    model_config = {"arbitrary_types_allowed": True}
 
 
 @dataclass

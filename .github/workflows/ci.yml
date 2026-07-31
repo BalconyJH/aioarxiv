@@ -1,0 +1,234 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      debug_enabled:
+        description: Enable extra debug diagnostics
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  # Keep every trusted main SHA alive: Auto Tag joins the exact push runs.
+  # Pull request updates still replace stale checks for the same PR ref.
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  ruff:
+    name: Ruff
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          python-version: "3.12"
+          version: "0.11.32"
+          enable-cache: true
+          cache-suffix: lint-type-${{ github.event_name }}
+
+      - name: Show Runner Context
+        run: |
+          echo "Runner: $RUNNER_NAME ($RUNNER_OS/$RUNNER_ARCH)"
+          python --version
+          uv --version
+
+      - name: Sync deps
+        run: uv sync --locked --all-groups
+
+      - name: Ruff
+        run: |
+          uv run ruff format --check .
+          uv run ruff check .
+
+  ty:
+    name: Ty
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          python-version: "3.12"
+          version: "0.11.32"
+          enable-cache: true
+          cache-suffix: ty-${{ github.event_name }}
+
+      - name: Sync deps
+        run: uv sync --locked --all-groups
+
+      - name: Ty
+        run: uv run ty check
+
+  basedpyright:
+    name: Basedpyright
+    needs: ruff
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          python-version: "3.12"
+          version: "0.11.32"
+          enable-cache: true
+          cache-suffix: basedpyright-${{ github.event_name }}
+
+      - name: Sync deps
+        run: uv sync --locked --all-groups
+
+      - name: Basedpyright
+        run: make typecheck
+
+  package:
+    name: Package Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      BUILD_LOG: package-build.log
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          python-version: "3.12"
+          version: "0.11.32"
+          enable-cache: true
+          cache-suffix: package-${{ github.event_name }}
+
+      - name: Build distributions
+        run: |
+          set -o pipefail
+          uv build --no-sources 2>&1 | tee "${BUILD_LOG}"
+
+      - name: Validate distributions
+        run: |
+          uvx --from twine==6.2.0 twine check dist/*
+          python3 scripts/verify_distribution.py dist \
+            --expected-version "$(uv version --short)" \
+            --metadata-only
+
+      - name: Show built distributions
+        run: |
+          ls -la dist
+          sha256sum dist/* || true
+
+      - name: Upload built distributions
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: package-dist
+          path: |
+            dist/*.whl
+            dist/*.tar.gz
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload build logs
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: package-build-logs
+          path: ${{ env.BUILD_LOG }}
+          if-no-files-found: warn
+          retention-days: 14
+
+  package-wheel-smoke:
+    name: Wheel Smoke (Python ${{ matrix.python-version }})
+    needs: package
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          python-version: ${{ matrix.python-version }}
+          version: "0.11.32"
+          enable-cache: true
+          cache-suffix: package-wheel-${{ matrix.python-version }}-${{ github.event_name }}
+
+      - name: Download built distributions
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: package-dist
+          path: dist
+
+      - name: Verify installed wheel
+        env:
+          PYTHON_VERSION: ${{ matrix.python-version }}
+        run: |
+          python3 scripts/verify_distribution.py dist \
+            --expected-version "$(uv version --short)" \
+            --python "${PYTHON_VERSION}" \
+            --uv uv \
+            --wheel-only-smoke
+
+  result:
+    name: Required Checks
+    if: always()
+    needs:
+      - ruff
+      - ty
+      - basedpyright
+      - package
+      - package-wheel-smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Require every CI layer
+        shell: bash
+        env:
+          BASEDPYRIGHT_RESULT: ${{ needs.basedpyright.result }}
+          PACKAGE_RESULT: ${{ needs.package.result }}
+          PACKAGE_WHEEL_SMOKE_RESULT: ${{ needs.package-wheel-smoke.result }}
+          RUFF_RESULT: ${{ needs.ruff.result }}
+          TY_RESULT: ${{ needs.ty.result }}
+        run: |
+          failed=false
+          for result in \
+            "${RUFF_RESULT}" \
+            "${TY_RESULT}" \
+            "${BASEDPYRIGHT_RESULT}" \
+            "${PACKAGE_RESULT}" \
+            "${PACKAGE_WHEEL_SMOKE_RESULT}"; do
+            if [[ "${result}" != "success" ]]; then
+              failed=true
+            fi
+          done
+          if [[ "${failed}" == "true" ]]; then
+            echo "::error::At least one required CI layer did not succeed."
+            exit 1
+          fi
+          echo "All required CI layers succeeded."

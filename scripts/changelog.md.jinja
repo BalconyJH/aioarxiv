@@ -1,0 +1,41 @@
+{#- macro: render_commit -#}
+{%- macro render_commit(commit) -%}
+- {{ commit.convention.subject|default(commit.subject) }}
+  ([{{ commit.hash|truncate(7, True, '') }}]({{ jinja_context.project_url }}/commit/{{ commit.hash }}),
+  {{ commit.author_name }}).
+{%- if commit.text_refs.issues_not_in_subject -%}
+{{ " Related issues and pull requests: " -}}
+{% for issue in commit.text_refs.issues_not_in_subject -%}
+[{{ issue.ref }}]({{ issue.url }}){% if not loop.last %}, {% endif -%}
+{%- endfor -%}
+{%- endif -%}
+{%- endmacro -%}
+
+{#- macro: render_section -#}
+{%- macro render_section(section, is_last) -%}
+### {{ section.type or "Miscellaneous" }}
+
+{% for commit in section.commits|sort(attribute="author_date", reverse=true)|unique(attribute="subject") -%}
+{{ render_commit(commit) }}{% if not loop.last %}
+{% endif -%}
+{% endfor -%}
+{{ "\n" if is_last else "\n\n" -}}
+{% endmacro -%}
+
+{#- template -#}
+# Changelog
+
+This page is generated from the Git history with `git-changelog`. Complete release
+details remain available on [GitHub Releases]({{ jinja_context.project_url }}/releases)
+and [PyPI]({{ jinja_context.pypi_url }}).
+
+<!-- insertion marker -->
+{%- set version = changelog.versions_list[0] %}
+## [{{ jinja_context.release_tag }}]({{ jinja_context.project_url }}/releases/tag/{{ jinja_context.release_tag }}) - {{ version.date }}
+
+<small>[Compare with {{ jinja_context.previous_tag }}]({{ jinja_context.project_url }}/compare/{{ jinja_context.previous_tag }}...{{ jinja_context.release_tag }})</small>
+
+{% set section_types = changelog.sections|select("in", version.sections_dict)|list -%}
+{% for type in section_types -%}
+{{ render_section(version.sections_dict[type], loop.last) }}
+{%- endfor -%}

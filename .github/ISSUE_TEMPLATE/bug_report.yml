@@ -1,13 +1,13 @@
-name: Bug 反馈
-title: "Bug: 出现异常"
-description: 提交 Bug 反馈以帮助我们改进代码
+name: Bug report
+title: "Bug: "
+description: Report a problem to help us improve aioarxiv
 labels: ["bug"]
 body:
   - type: dropdown
     id: env-os
     attributes:
-      label: 操作系统
-      description: 选择运行 aioarxiv 的系统
+      label: Operating system
+      description: Select the operating system running aioarxiv
       options:
         - Windows
         - MacOS
@@ -19,8 +19,8 @@ body:
   - type: input
     id: env-python-ver
     attributes:
-      label: Python 版本
-      description: 填写运行 aioarxiv 的 Python 版本
+      label: Python version
+      description: Enter the Python version running aioarxiv
       placeholder: e.g. 3.11.0
     validations:
       required: true
@@ -28,8 +28,8 @@ body:
   - type: input
     id: env-nb-ver
     attributes:
-      label: aioarxiv 版本
-      description: 填写 aioarxiv 版本
+      label: aioarxiv version
+      description: Enter the installed aioarxiv version
       placeholder: e.g. 0.1.0
     validations:
       required: true
@@ -37,31 +37,31 @@ body:
   - type: textarea
     id: describe
     attributes:
-      label: 描述问题
-      description: 清晰简洁地说明问题是什么
+      label: Problem description
+      description: Describe the problem clearly and concisely
     validations:
       required: true
 
   - type: textarea
     id: reproduction
     attributes:
-      label: 复现步骤
-      description: 提供能复现此问题的详细操作步骤
+      label: Reproduction steps
+      description: Provide detailed steps that reproduce the problem
       placeholder: |
-        1. 首先……
-        2. 然后……
-        3. 发生……
+        1. First...
+        2. Then...
+        3. The following happened...
     validations:
       required: true
 
   - type: textarea
     id: expected
     attributes:
-      label: 期望的结果
-      description: 清晰简洁地描述你期望发生的事情
+      label: Expected behavior
+      description: Describe what you expected to happen
 
   - type: textarea
     id: logs
     attributes:
-      label: 截图或日志
-      description: 提供有助于诊断问题的任何日志和截图
+      label: Screenshots or logs
+      description: Provide any logs or screenshots that may help diagnose the problem

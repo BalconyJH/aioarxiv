@@ -1,0 +1,162 @@
+name: Docs
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - docs/**
+      - mkdocs.yml
+      - README.md
+      - pyproject.toml
+      - uv.lock
+      - .python-version
+      - Makefile
+      - .github/workflows/docs.yml
+      - .github/workflows/docs-pr-preview.yml
+      - .github/workflows/docs-pr-preview-deploy.yml
+      - .github/workflows/docs-pr-preview-cleanup.yml
+  workflow_dispatch:
+    inputs:
+      debug_enabled:
+        description: Enable extra debug diagnostics
+        required: false
+        default: false
+        type: boolean
+
+permissions: {}
+
+concurrency:
+  group: docs-validation-${{ github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build docs strictly
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    env:
+      DOCS_LOG: docs-build.log
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          python-version: "3.12"
+          version: "0.11.32"
+          enable-cache: true
+          cache-suffix: docs-validation
+
+      - name: Show runner context
+        run: |
+          echo "Runner: $RUNNER_NAME ($RUNNER_OS/$RUNNER_ARCH)"
+          python --version
+          uv --version
+
+      - name: Sync docs dependencies
+        run: uv sync --locked --group docs --no-default-groups
+
+      - name: Show dependency snapshot
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.debug_enabled }}
+        run: |
+          uv pip list
+          uv tree
+
+      - name: Build docs
+        run: |
+          set -o pipefail
+          uv run zensical build --strict 2>&1 | tee "${DOCS_LOG}"
+
+      - name: Upload docs build logs
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: docs-build-logs
+          path: ${{ env.DOCS_LOG }}
+          if-no-files-found: warn
+          retention-days: 14
+
+  deploy:
+    name: Deploy development docs
+    needs: build
+    # Only publish on real pushes to main; workflow_dispatch stays validation-only.
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: write # Commit the main branch's generated docs to gh-pages.
+    concurrency:
+      # Serialize every gh-pages writer so concurrent runs never race the push.
+      group: docs-dev-deploy
+      cancel-in-progress: false
+    env:
+      DEPLOY_LOG: dev-docs-deploy.log
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          python-version: "3.12"
+          version: "0.11.32"
+          enable-cache: true
+          cache-suffix: docs-dev-deploy
+
+      - name: Sync docs dependencies
+        run: uv sync --locked --group docs --no-default-groups
+
+      - name: Build docs strictly
+        run: uv run zensical build --strict
+
+      - name: Configure deployment identity
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+
+      - name: Deploy dev docs with conflict retry
+        shell: bash
+        run: |
+          set -euo pipefail
+          : > "${DEPLOY_LOG}"
+
+          for attempt in 1 2 3; do
+            echo "Deployment attempt ${attempt}/3" | tee -a "${DEPLOY_LOG}"
+            git branch --delete --force gh-pages 2>/dev/null || true
+            if git ls-remote --exit-code --heads origin gh-pages >/dev/null; then
+              git fetch --force origin gh-pages:gh-pages
+            fi
+
+            # The rolling "dev" version tracks main HEAD; "latest" stays owned by
+            # released tags, so releases and main deploys never fight over aliases.
+            if uv run mike deploy dev 2>&1 | tee -a "${DEPLOY_LOG}" \
+              && git push origin gh-pages:gh-pages 2>&1 | tee -a "${DEPLOY_LOG}"; then
+              exit 0
+            fi
+
+            if [[ "${attempt}" == "3" ]]; then
+              echo "::error::Failed to deploy dev docs after ${attempt} attempts."
+              exit 1
+            fi
+            sleep "$((attempt * 2))"
+          done
+
+      - name: Upload dev docs deployment log
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: dev-docs-deploy-log
+          path: ${{ env.DEPLOY_LOG }}
+          if-no-files-found: warn
+          retention-days: 14

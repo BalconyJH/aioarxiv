@@ -1,15 +1,13 @@
-from datetime import datetime
-from typing import ClassVar, Optional, cast
+from datetime import datetime, timezone
+from typing import ClassVar, cast
 import xml.etree.ElementTree as ET
 from zoneinfo import ZoneInfo
 
 from aiohttp import ClientResponse
 from defusedxml import ElementTree as DefusedET
 from pydantic import AnyUrl, HttpUrl
-from yarl import URL
 
-from aioarxiv.config import default_config
-from aioarxiv.exception import ParserException
+from aioarxiv.exception import ParserException, QueryBuildError
 from aioarxiv.models import (
     Author,
     BasicInfo,
@@ -22,21 +20,23 @@ from aioarxiv.models import (
 )
 
 from . import create_parser_exception
-from .log import logger
+from .log import ConfigManager, logger
+
+ERROR_ENTRY_ID_PREFIX = "http://arxiv.org/api/errors"
 
 
 class ArxivParser:
-    """
-    arXiv API响应解析器
+    """Parser for arXiv API Atom responses.
 
     Attributes:
-        NS (ClassVar[dict[str, str]]): XML命名空间
+        NS (ClassVar[dict[str, str]]): XML namespace mapping.
 
     Args:
-        response_context: API响应内容
+        response_context: Raw API response body.
+        raw_response: The originating HTTP response.
 
     Raises:
-        ParserException: 如果解析失败
+        ParserException: If the response is not well-formed XML.
     """
 
     NS: ClassVar[dict[str, str]] = {
@@ -48,13 +48,20 @@ class ArxivParser:
     def __init__(self, response_context: str, raw_response: ClientResponse) -> None:
         self.response_context = response_context
         self.raw_response = raw_response
-        self.entry = DefusedET.fromstring(response_context)
+        try:
+            self.root: ET.Element = DefusedET.fromstring(response_context)
+        except ET.ParseError as e:
+            raise ParserException(
+                url=str(raw_response.url),
+                message="Failed to parse response as XML",
+                original_error=e,
+            ) from e
 
     @staticmethod
     def build_paper(
         data: ET.Element,
     ) -> Paper:
-        """统一处理论文解析"""
+        """Build a Paper model from a single Atom entry."""
         parser = PaperParser(data)
         basic_info = parser.parse_basics_info()
         return Paper(
@@ -63,75 +70,85 @@ class ArxivParser:
             **parser.parse_optional_fields(),
         )
 
-    def _parse_root(self) -> list[Paper]:
-        """
-        解析根元素
+    def _raise_if_error_entry(self) -> None:
+        """Detect the arXiv API error signalling convention.
 
-        Returns:
-            list[Paper]: 论文列表
+        The API reports parameter errors as HTTP 200 with a single entry whose
+        ``<id>`` starts with ``http://arxiv.org/api/errors``; the ``<summary>``
+        carries the error message. A legitimate empty feed (``totalResults=0``,
+        no entries) is not an error.
 
         Raises:
-            ParserException: 如果解析失败
+            QueryBuildError: If the feed is an API error entry.
         """
-        entries = self.entry.findall("atom:entry", ArxivParser.NS)
-        papers = []
+        entries = self.root.findall("atom:entry", ArxivParser.NS)
+        if len(entries) != 1:
+            return
 
-        for i, entry in enumerate(entries):
-            if paper := self.build_paper(entry):
-                papers.append(paper)
+        entry_id = entries[0].findtext("atom:id", default="", namespaces=ArxivParser.NS)
+        if not entry_id.startswith(ERROR_ENTRY_ID_PREFIX):
+            return
 
-            else:
-                raise create_parser_exception(
-                    entry,
-                    str(self.raw_response.url),
-                    message=f"解析第 {i + 1} 篇论文失败",
-                    namespace=ArxivParser.NS["atom"],
-                )
-        return papers
+        summary = entries[0].findtext(
+            "atom:summary", default="", namespaces=ArxivParser.NS
+        )
+        raise QueryBuildError(
+            f"arXiv API rejected the query: {summary.strip() or 'unknown error'}"
+        )
 
     def parse_feed(self) -> list[Paper]:
-        """
-        解析arXiv API的Atom feed内容
+        """Parse all entries of the Atom feed into papers.
 
         Returns:
-            list[Paper]: 论文列表
-        """
-        try:
-            papers = self._parse_root()
-        except ET.ParseError as e:
-            raise create_parser_exception(
-                self.entry,
-                str(self.raw_response.url),
-                message="解析失败",
-                error=e,
-            ) from e
-        except ParserException:
-            raise
-        else:
-            logger.trace(f"Parsed {len(papers)} papers")
-            return papers
-
-    def parse_total_result(self) -> int:
-        """
-        解析总结果数
-
-        Returns:
-            int: 总结果数
+            list[Paper]: Parsed papers (empty for an empty feed).
 
         Raises:
-            ParserException: 如果解析失败
+            QueryBuildError: If the feed is an API error entry.
+            ParserException: If an entry cannot be parsed.
         """
-        total_element = self.entry.find("opensearch:totalResults", ArxivParser.NS)
+        self._raise_if_error_entry()
+        entries = self.root.findall("atom:entry", ArxivParser.NS)
+        papers = [self.build_paper(entry) for entry in entries]
+        logger.trace(f"Parsed {len(papers)} papers")
+        return papers
+
+    def parse_total_result(self) -> int:
+        """Parse the total result count from the feed.
+
+        Returns:
+            int: Total number of matching results.
+
+        Raises:
+            ParserException: If the element is missing or not an integer.
+        """
+        total_element = self.root.find("opensearch:totalResults", ArxivParser.NS)
         if total_element is None or total_element.text is None:
             raise create_parser_exception(
-                self.entry,
-                "",
-                message="缺少总结果数元素",
+                self.root,
+                str(self.raw_response.url),
+                message="Missing total results element",
             )
 
-        return int(total_element.text)
+        try:
+            return int(total_element.text)
+        except ValueError as e:
+            raise create_parser_exception(
+                self.root,
+                str(self.raw_response.url),
+                message=f"Invalid total results value: {total_element.text!r}",
+                error=e,
+            ) from e
 
     def build_search_result(self, query_params: SearchParams) -> SearchResult:
+        """Build a SearchResult from the parsed feed.
+
+        Args:
+            query_params: The search parameters used for the request.
+
+        Returns:
+            SearchResult: Result with papers and base metadata; pagination
+            fields are finalized by the client.
+        """
         return SearchResult(
             papers=self.parse_feed(),
             total_result=self.parse_total_result(),
@@ -141,28 +158,29 @@ class ArxivParser:
             metadata=Metadata(
                 missing_results=0,
                 pagesize=0,
-                source=URL(self.raw_response.url),
+                source=str(self.raw_response.url),
                 end_time=None,
             ),
         )
 
 
 class PaperParser:
-    """Paper解析器"""
+    """Parser for a single Atom entry element."""
 
     def __init__(self, entry: ET.Element) -> None:
         self.entry = entry
 
     def parse_authors(self) -> list[Author]:
-        """
-        解析作者信息
+        """Parse author elements.
 
         Returns:
-            list[Author]: 作者列表
+            list[Author]: Authors with optional affiliations.
+
+        Raises:
+            ParserException: If no author is present.
         """
 
-        def get_text(element: ET.Element, tag: str, namespace: dict) -> Optional[str]:
-            """辅助函数,  用于获取子元素的文本内容"""
+        def get_text(element: ET.Element, tag: str, namespace: dict) -> str | None:
             sub_elem = element.find(tag, namespace)
             return sub_elem.text if sub_elem is not None else None
 
@@ -178,24 +196,31 @@ class PaperParser:
             raise create_parser_exception(
                 self.entry,
                 "",
-                message="缺少作者信息",
+                message="Missing author information",
             )
 
-        logger.trace(f"作者信息: {authors}")
+        logger.trace(f"Authors: {authors}")
         return authors
 
     def parse_categories(self) -> Category:
-        """
-        解析分类信息
+        """Parse primary and secondary categories.
+
+        Secondary categories are all ``<category>`` terms minus the primary
+        term.
 
         Returns:
-            Category: 分类信息
+            Category: Parsed category information.
+
+        Raises:
+            ParserException: If the primary category is missing.
         """
 
         def parse_primary() -> PrimaryCategory:
             primary_elem = self.entry.find("arxiv:primary_category", ArxivParser.NS)
             if primary_elem is None:
-                raise create_parser_exception(self.entry, "", message="缺少主分类信息")
+                raise create_parser_exception(
+                    self.entry, "", message="Missing primary category"
+                )
             return PrimaryCategory(
                 term=primary_elem.get("term", ""),
                 scheme=cast("AnyUrl", primary_elem.attrib.get("scheme")),
@@ -203,12 +228,11 @@ class PaperParser:
             )
 
         def parse_secondary(primary_term: str) -> list[str]:
-            categories = []
-            for cat in self.entry.findall("category", ArxivParser.NS):
-                term = cat.get("term")
-                if term and term != primary_term:
-                    categories.append(term)
-            return categories
+            return [
+                term
+                for cat in self.entry.findall("atom:category", ArxivParser.NS)
+                if (term := cat.get("term")) and term != primary_term
+            ]
 
         primary = parse_primary()
         secondary = parse_secondary(primary.term)
@@ -216,11 +240,13 @@ class PaperParser:
         return Category(primary=primary, secondary=secondary)
 
     def parse_basics_info(self) -> BasicInfo:
-        """
-        解析基础信息
+        """Parse the mandatory entry fields.
 
         Returns:
-            BasicInfo: 基础信息
+            BasicInfo: Basic paper information.
+
+        Raises:
+            ParserException: If a mandatory element is missing.
         """
 
         def get_or_raise(element: ET.Element, tag: str) -> str:
@@ -229,12 +255,12 @@ class PaperParser:
                 raise create_parser_exception(
                     element,
                     "",
-                    message=f"缺少 {tag} 元素",
+                    message=f"Missing {tag} element",
                 )
             return sub_elem.text
 
         return BasicInfo(
-            id=get_or_raise(self.entry, "id").split("/")[-1],
+            id=self._extract_arxiv_id(get_or_raise(self.entry, "id")),
             title=get_or_raise(self.entry, "title"),
             summary=get_or_raise(self.entry, "summary"),
             authors=self.parse_authors(),
@@ -243,48 +269,68 @@ class PaperParser:
             updated=self.parse_datetime(get_or_raise(self.entry, "updated")),
         )
 
-    def parse_pdf_url(self) -> Optional[HttpUrl]:
-        """
-        解析PDF链接
+    @staticmethod
+    def _extract_arxiv_id(abs_url: str) -> str:
+        """Extract the arXiv id from an abs page URL.
+
+        Strips the scheme, host and ``/abs/`` prefix so old-style ids that
+        contain a slash (e.g. ``cond-mat/0102536v1``) survive intact.
+
+        Args:
+            abs_url: The entry ``<id>`` value, e.g.
+                ``http://arxiv.org/abs/cond-mat/0102536v1``.
 
         Returns:
-            Optional[str]: PDF链接或None
+            str: The arXiv id, e.g. ``cond-mat/0102536v1``.
         """
-        try:
-            links = self.entry.findall("atom:link", ArxivParser.NS)
-            if not links:
-                logger.warning("未找到任何链接")
-                return None
+        _, sep, arxiv_id = abs_url.partition("/abs/")
+        return arxiv_id if sep else abs_url
 
+    def parse_pdf_url(self) -> HttpUrl | None:
+        """Parse the PDF link.
+
+        Links are matched by ``(rel == "related", title == "pdf")`` per the
+        API spec, with ``type == "application/pdf"`` as a fallback.
+
+        Returns:
+            Optional[HttpUrl]: The PDF URL, or None if absent.
+        """
+        links = self.entry.findall("atom:link", ArxivParser.NS)
+        if not links:
+            logger.warning("No links found in entry")
+            return None
+
+        pdf_url = next(
+            (
+                link.attrib["href"]
+                for link in links
+                if link.get("rel") == "related"
+                and link.get("title") == "pdf"
+                and "href" in link.attrib
+            ),
+            None,
+        )
+        if pdf_url is None:
             pdf_url = next(
                 (
                     link.attrib["href"]
                     for link in links
-                    if link.attrib.get("type") == "application/pdf"
+                    if link.get("type") == "application/pdf" and "href" in link.attrib
                 ),
                 None,
             )
 
-            if pdf_url is None:
-                logger.warning("未找到PDF链接")
-                return None
+        if pdf_url is None:
+            logger.warning("No PDF link found in entry")
+            return None
 
-            return cast("HttpUrl", pdf_url)
+        return cast("HttpUrl", pdf_url)
 
-        except (KeyError, AttributeError) as e:
-            raise create_parser_exception(
-                self.entry,
-                "PDF链接解析失败",
-                namespace=ArxivParser.NS["atom"],
-                error=e,
-            ) from e
-
-    def parse_optional_fields(self) -> dict[str, Optional[str]]:
-        """
-        解析可选字段
+    def parse_optional_fields(self) -> dict[str, str | None]:
+        """Parse the optional arXiv extension fields.
 
         Returns:
-            dict: 可选字段字典
+            dict: Mapping with ``comment``, ``journal_ref`` and ``doi``.
         """
         fields = {
             "comment": self.entry.find("arxiv:comment", ArxivParser.NS),
@@ -296,22 +342,26 @@ class PaperParser:
 
     @staticmethod
     def parse_datetime(date_str: str) -> datetime:
-        """
-        解析ISO格式的日期时间字符串
+        """Parse an ISO datetime string and convert to the configured timezone.
+
+        The API emits UTC instants (``Z`` suffix); the instant is preserved
+        and converted via ``astimezone`` instead of relabeling the tzinfo.
 
         Args:
-            date_str: ISO格式的日期时间字符串
+            date_str: ISO format datetime string.
 
         Returns:
-            datetime: 解析后的datetime对象
+            datetime: Datetime in the configured timezone.
 
         Raises:
-            ValueError: 日期格式无效
+            ValueError: If the datetime format is invalid.
         """
         try:
-            normalized_date = date_str.replace("Z", "+00:00")
-            dt = datetime.fromisoformat(normalized_date)
-            return dt.replace(tzinfo=ZoneInfo(default_config.timezone))
+            dt = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
         except ValueError as e:
-            msg = f"日期格式: {date_str} 不符合预期"
+            msg = f"Invalid datetime format: {date_str}"
             raise ValueError(msg) from e
+
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(ZoneInfo(ConfigManager.get_config().timezone))

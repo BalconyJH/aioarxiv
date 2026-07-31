@@ -1,18 +1,18 @@
-name: 文档改进
-title: "Docs: 描述"
-description: 文档错误及改进意见反馈
+name: Documentation improvement
+title: "Docs: "
+description: Report a documentation problem or suggest an improvement
 labels: ["documentation"]
 body:
   - type: textarea
     id: problem
     attributes:
-      label: 描述问题或主题
+      label: Problem or topic
     validations:
       required: true
 
   - type: textarea
     id: improve
     attributes:
-      label: 需做出的修改
+      label: Proposed change
     validations:
       required: true

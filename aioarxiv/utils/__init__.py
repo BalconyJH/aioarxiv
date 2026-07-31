@@ -2,17 +2,14 @@ from datetime import datetime
 import re
 from time import monotonic
 from types import SimpleNamespace
-from typing import Optional
 import xml.etree.ElementTree as ET
 from zoneinfo import ZoneInfo
 
 import aiohttp
-from tenacity import RetryCallState
 
-from aioarxiv.config import default_config
 from aioarxiv.exception import ParseErrorContext, ParserException
 
-from .log import logger
+from .log import ConfigManager, logger
 
 
 def create_trace_config() -> aiohttp.TraceConfig:
@@ -66,10 +63,10 @@ def create_trace_config() -> aiohttp.TraceConfig:
 
 def create_parser_exception(
     data: ET.Element,
-    url: Optional[str] = None,
-    message: Optional[str] = None,
-    namespace: Optional[str] = None,
-    error: Optional[Exception] = None,
+    url: str | None = None,
+    message: str | None = None,
+    namespace: str | None = None,
+    error: Exception | None = None,
 ) -> ParserException:
     """
     Create a parsing exception for XML data parsing errors.
@@ -86,7 +83,7 @@ def create_parser_exception(
     """
     return ParserException(
         url=url or "",
-        message=message or "解析响应失败",
+        message=message or "Failed to parse response",
         context=ParseErrorContext(
             raw_content=ET.tostring(data, encoding="unicode"),
             element_name=data.tag,
@@ -94,28 +91,6 @@ def create_parser_exception(
         ),
         original_error=error,
     )
-
-
-def calculate_page_size(
-    config_page_size: int,
-    start: int,
-    max_results: Optional[int],
-) -> int:
-    """
-    Calculate page size constrained by configuration page size and maximum results.
-
-    Args:
-        config_page_size (int): Configured page size.
-        start (int): Starting position.
-        max_results (Optional[int]): Maximum number of results.
-
-    Returns:
-        int: Calculated page size.
-    """
-    if max_results is None:
-        return config_page_size
-
-    return min(config_page_size, max_results - start)
 
 
 def format_datetime(dt: datetime) -> str:
@@ -133,7 +108,7 @@ def format_datetime(dt: datetime) -> str:
         >>> format_datetime(datetime(2024, 3, 21, 15, 30, 0))
         '2024-03-21_15-30-00_CST'
     """
-    local_dt = dt.astimezone(ZoneInfo(default_config.timezone))
+    local_dt = dt.astimezone(ZoneInfo(ConfigManager.get_config().timezone))
     return local_dt.strftime("%Y-%m-%d_%H-%M-%S_%Z")
 
 
@@ -170,20 +145,3 @@ def sanitize_title(title: str, max_length: int = 50) -> str:
         sanitized = f"{sanitized[: max_length - 3].rstrip('-')}..."
 
     return sanitized
-
-
-def log_retry_attempt(retry_state: RetryCallState) -> None:
-    """
-    Log retry attempt information.
-
-    Args:
-        retry_state (RetryCallState): Current retry state containing attempt
-            information.
-
-    Examples:
-        >>> log_retry_attempt(RetryCallState(attempt_number=2))
-        WARNING:root:retry times: 2/3
-    """
-    logger.warning(
-        f"retry times: {retry_state.attempt_number}/{default_config.max_retries}"
-    )

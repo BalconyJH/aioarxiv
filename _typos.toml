@@ -1,0 +1,3 @@
+[default.extend-words]
+# Official package name included verbatim in generated release notes.
+certifi = "certifi"

@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import ClassVar
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -25,7 +25,7 @@ class ArxivConfig(BaseSettings):
     """
 
     base_url: str = Field(
-        default="http://export.arxiv.org/api/query",
+        default="https://export.arxiv.org/api/query",
         description="Base URL for arXiv API endpoints",
     )
     timeout: float = Field(default=30.0, description="Request timeout in seconds", gt=0)
@@ -46,16 +46,21 @@ class ArxivConfig(BaseSettings):
         ge=0,
     )
     max_concurrent_requests: int = Field(
-        default=1, description="Maximum number of concurrent requests"
+        default=1, description="Maximum number of concurrent requests", ge=1
     )
-    proxy: Optional[str] = Field(default=None, description="HTTP/HTTPS proxy URL")
+    proxy: str | None = Field(default=None, description="HTTP/HTTPS proxy URL")
     log_level: str = Field(default="INFO", description="Application logging level")
-    page_size: int = Field(default=1000, description="Results per page")
+    page_size: int = Field(
+        default=1000,
+        description="Results per page (arXiv API caps a single request at 2000)",
+        gt=0,
+        le=2000,
+    )
     min_wait: float = Field(
         default=3.0, description="Minimum retry wait time in seconds", gt=0
     )
 
-    model_config = SettingsConfigDict(
+    model_config: ClassVar[SettingsConfigDict] = SettingsConfigDict(
         env_prefix="ARXIV_",
         env_file_encoding="utf-8",
         case_sensitive=False,
@@ -64,4 +69,4 @@ class ArxivConfig(BaseSettings):
     )
 
 
-default_config = ArxivConfig()
+default_config: ArxivConfig = ArxivConfig()
