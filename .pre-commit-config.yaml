@@ -1,16 +1,81 @@
-default_install_hook_types: [pre-commit]
-ci:
-  autofix_commit_msg: ":rotating_light: auto fix by pre-commit hooks"
-  autofix_prs: true
-  autoupdate_branch: main
-  autoupdate_schedule: monthly
-  autoupdate_commit_msg: ":arrow_up: auto update by pre-commit hooks"
+fail_fast: false
+
+exclude: |
+  (?x)^(
+    tests/data/.*
+  )$
+
 repos:
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.9.10
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
     hooks:
-      - id: ruff
-        args: [--fix]
-        stages: [pre-commit]
+      - id: check-merge-conflict
+      - id: end-of-file-fixer
+
+  - repo: https://github.com/abravalheri/validate-pyproject
+    rev: v0.25
+    hooks:
+      - id: validate-pyproject
+
+  - repo: https://github.com/crate-ci/typos
+    rev: v1.45.1
+    hooks:
+      - id: typos
+
+  - repo: https://github.com/rbubley/mirrors-prettier
+    rev: v3.8.3
+    hooks:
+      - id: prettier
+        types: [yaml]
+
+  # zizmor detects security vulnerabilities in GitHub Actions workflows.
+  - repo: https://github.com/zizmorcore/zizmor-pre-commit
+    rev: v1.24.1
+    hooks:
+      - id: zizmor
+        args: [--pedantic]
+
+  - repo: https://github.com/python-jsonschema/check-jsonschema
+    rev: 0.37.1
+    hooks:
+      - id: check-github-workflows
+
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.11.0.1
+    hooks:
+      - id: shellcheck
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.11
+    hooks:
       - id: ruff-format
-        stages: [pre-commit]
+      - id: ruff-check
+        args: [--fix, --exit-non-zero-on-fix]
+        types_or: [python, pyi]
+        require_serial: true
+
+  - repo: https://github.com/igorshubovych/markdownlint-cli
+    rev: v0.48.0
+    hooks:
+      - id: markdownlint-fix
+        files: ^docs/.*\.md$
+
+  # `actionlint` verifies GitHub Actions workflow syntax and, through its
+  # shellcheck integration, the shell scripts embedded in `run:` steps.
+  - repo: https://github.com/rhysd/actionlint
+    rev: v1.7.12
+    hooks:
+      - id: actionlint
+        stages:
+          # This hook is disabled by default, since it's quite slow.
+          # To run all hooks *including* this hook, use `prek run -a --hook-stage=manual`.
+          # To run *just* this hook, use `prek run -a actionlint --hook-stage=manual`.
+          - manual
+        args:
+          - "-ignore=SC2129" # ignorable stylistic lint from shellcheck
+          - "-ignore=SC2016" # another shellcheck lint: seems to have false positives?
+        language: golang # means renovate will also update `additional_dependencies`
+        additional_dependencies:
+          # actionlint extracts the shell scripts in `run:` steps and checks them
+          # with shellcheck, but only when a shellcheck binary is available.
+          - "github.com/wasilibs/go-shellcheck/cmd/shellcheck@v0.11.1"

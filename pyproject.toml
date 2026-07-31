@@ -1,7 +1,7 @@
 [project]
 name = "aioarxiv"
 version = "0.2.0"
-description = "arxiv Parse library"
+description = "Asynchronous arXiv API client with rate limiting and paper downloads"
 authors = [
     { name = "BalconyJH", email = "balconyjh@gmail.com" },
 ]
@@ -16,20 +16,74 @@ dependencies = [
     "pydantic-settings>=2.7.1",
     "defusedxml>=0.7.1",
     "certifi>=2025.10.5",
+    "aiolimiter>=1.2.1",
+    "typing-extensions>=4.15.0",
 ]
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 readme = "README.md"
-license = { text = "MIT" }
-package = { include = ["aioarxiv"] }
+license = "MIT"
+license-files = ["LICENSE"]
+keywords = ["arxiv", "asyncio", "aiohttp", "api-client"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Framework :: AsyncIO",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Scientific/Engineering",
+    "Typing :: Typed",
+]
+
+[project.urls]
+Homepage = "https://github.com/BalconyJH/aioarxiv"
+Repository = "https://github.com/BalconyJH/aioarxiv"
+"Bug Tracker" = "https://github.com/BalconyJH/aioarxiv/issues"
+
+[dependency-groups]
+test = [
+    "pytest-cov~=5.0",
+    "pytest-xdist~=3.6",
+    "pytest-asyncio~=0.23",
+    "pytest-mock>=3.14.0",
+    "pytest>=8.4.2",
+]
+dev = [
+    "ruff>=0.15",
+    "basedpyright>=1.39.9",
+    "ty>=0.0.63",
+]
+docs = [
+    "mike",
+    "mkdocstrings-python>=2.0.5",
+    "zensical>=0.0.51",
+]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-addopts = "--cov-report=term-missing --ignore=.venv/"
+addopts = "--cov=aioarxiv --cov-report=term-missing --ignore=.venv/"
 asyncio_default_fixture_loop_scope = "session"
+
+[tool.coverage.run]
+omit = [
+    ".venv/*",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "\\.\\.\\.$",
+]
 
 [tool.ruff]
 line-length = 88
-target-version = "py39"
+target-version = "py310"
 
 [tool.ruff.lint]
 select = [
@@ -62,10 +116,9 @@ select = [
     "SLOT",  # flake8-slots
     "SIM",   # flake8-simplify
     "TID",   # flake8-tidy-imports
-    "TC",   # flake8-type-checking
+    "TC",    # flake8-type-checking
     "ARG",   # flake8-unused-arguments
     "PTH",   # flake8-use-pathlib
-    # "ERA",   # eradicate
     "PD",    # pandas-vet
     "PGH",   # pygrep-hooks
     "PL",    # pylint
@@ -89,6 +142,7 @@ ignore = [
     "RET503",  # 就要 implicit return none
     "PLC0105",  # 我们已经用 R 表示协变，Q 表示逆变了
     "PLR0913",  # 参数就那么多的，你用 builder 什么的不是更逆天？
+    "PLR0917",  # 同 PLR0913，位置参数数量属于 API 设计自由
     "SIM108",  # 迫真 simplicy
     "RUF009",  # 我不想要额外的全局变量。
     "RUF003",  # 中文注释里用全角符号怎么你了
@@ -105,9 +159,6 @@ ignore = [
 ]
 flake8-quotes = { inline-quotes = "double", multiline-quotes = "double" }
 
-[tool.ruff.lint.flake8-annotations]
-mypy-init-return = true
-
 [tool.ruff.lint.flake8-builtins]
 builtins-ignorelist = ["id"]
 
@@ -117,51 +168,35 @@ line-ending = "lf"
 [tool.ruff.lint.isort]
 length-sort = false
 force-sort-within-sections = true
-known-first-party = ["aioarxiv", "tests/*"]
+known-first-party = ["aioarxiv", "tests"]
 extra-standard-library = ["typing_extensions"]
-
-[tool.ruff.lint.flake8-pytest-style]
-fixture-parentheses = false
-mark-parentheses = false
 
 [tool.ruff.lint.pyupgrade]
 keep-runtime-typing = true
 
-[tool.pyright]
-pythonVersion = "3.9"
+[tool.basedpyright]
+pythonVersion = "3.10"
 pythonPlatform = "All"
-venv = ".venv"
+typeCheckingMode = "standard"
+include = ["aioarxiv", "tests"]
 executionEnvironments = [
     { root = "./tests", extraPaths = [
         "./",
     ] },
     { root = "./" },
 ]
-typeCheckingMode = "standard"
+exclude = [
+    "**/__pycache__",
+    ".venv/**",
+]
 disableBytesTypePromotions = true
 
-[tool.pdm]
-distribution = true
+[tool.ty.rules]
+deprecated = "ignore"
 
-[dependency-groups]
-test = [
-    "pytest-cov~=5.0",
-    "pytest-xdist~=3.6",
-    "pytest-asyncio~=0.23",
-    "pytest-mock>=3.14.0",
-]
-dev = [
-    "pyright[nodejs]>=1.1.391",
-    "ruff>=0.8",
-    "pre-commit~=4.0",
-    "bump-my-version>=0.28.1",
-]
-
-[tool.coverage.run]
-omit = [
-    ".venv/*",
-]
+[tool.uv.sources]
+mike = { git = "https://github.com/squidfunk/mike.git", rev = "2d4ad799442f4592db8ad53b179bfb33db8c69ac" }
 
 [build-system]
-requires = ["pdm-backend"]
-build-backend = "pdm.backend"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
