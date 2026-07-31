@@ -1,0 +1,69 @@
+site_name: aioarxiv
+site_url: !ENV [DOCS_SITE_URL, "https://balconyjh.github.io/aioarxiv/"]
+site_description: Async Python client for the arXiv API with rate limiting and paper downloads.
+
+repo_name: BalconyJH/aioarxiv
+repo_url: https://github.com/BalconyJH/aioarxiv
+edit_uri: edit/main/docs/
+
+theme:
+  variant: modern
+  features:
+    - content.code.annotate
+    - content.code.copy
+    - navigation.top
+    - search.highlight
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: lucide/sun
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: lucide/moon-star
+        name: Switch to light mode
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: ["."]
+          inventories:
+            - https://docs.python.org/3/objects.inv
+          options:
+            docstring_style: google
+
+extra:
+  scope: !ENV [DOCS_SCOPE, "/aioarxiv/"]
+  version:
+    provider: !ENV [DOCS_VERSION_PROVIDER, "mike"]
+    default: latest
+    alias: true
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - pymdownx.details
+  - pymdownx.highlight
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - toc:
+      permalink: true
+
+nav:
+  - Home: index.md
+  - Usage: usage.md
+  - Configuration: configuration.md
+  - API Reference: api.md
+  - Contributing: contributing.md
+  - Maintenance:
+      - CI: ci.md
+      - Release: release.md
+      - Repository governance: governance.md
+  - FAQ: faq.md
+  - Changelog: changelog.md

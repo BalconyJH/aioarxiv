@@ -1,13 +1,21 @@
+# Markdownlint configuration.
+default: true
+
+# Line length: handled by editor soft wrap, not enforced.
 MD013: false
+
+# Allow duplicate headings when they are not siblings.
 MD024:
   siblings_only: true
+
+# Multiple top-level headings: pages may use H1 freely.
+MD025: false
+
+# Inline HTML is required by some theme features.
 MD033: false
 
-code-block:
-  ignore: true
+# First line does not have to be a top-level heading.
+MD041: false
 
-markdown-code-block:
-  format: false
-
-fenced-code-blocks:
-  validate: false
+# Code block style: both fenced and indented are used.
+MD046: false
