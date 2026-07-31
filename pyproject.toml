@@ -47,11 +47,11 @@ Repository = "https://github.com/BalconyJH/aioarxiv"
 
 [dependency-groups]
 test = [
-    "pytest-cov~=5.0",
+    "pytest-cov~=7.0",
     "pytest-xdist~=3.6",
-    "pytest-asyncio~=0.23",
+    "pytest-asyncio~=1.4",
     "pytest-mock>=3.14.0",
-    "pytest>=8.4.2",
+    "pytest>=9.1.1",
 ]
 dev = [
     "ruff>=0.15",
