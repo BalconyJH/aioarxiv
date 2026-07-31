@@ -1,9 +1,8 @@
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from pydantic import HttpUrl, ValidationError
+from pydantic import HttpUrl
 import pytest
-from yarl import URL
 
 from aioarxiv.models import Metadata, Paper, SearchParams, SearchResult
 
@@ -23,10 +22,17 @@ def paper_base_info():
 
 @pytest.mark.parametrize(
     "doi",
-    ["10.1234/test.123", "10.12345/test-123", "10.1234/test_123"],
+    [
+        "10.1234/test.123",
+        "10.12345/test-123",
+        # SICI-style DOI found on pre-2001 arXiv records; must be kept verbatim
+        "10.1002/1521-3951(200009)221:1<453::AID-PSSB453>3.0.CO;2-Q",
+        # arxiv:doi occasionally carries multiple space-separated DOIs
+        "10.1000/a 10.1000/b",
+    ],
 )
-def test_valid_doi(paper_base_info, doi) -> None:
-    """测试有效的DOI格式"""
+def test_doi_kept_verbatim(paper_base_info, doi) -> None:
+    """Test that DOI values from the feed are stored without validation"""
     paper = Paper(
         info=paper_base_info,
         doi=doi,
@@ -35,26 +41,6 @@ def test_valid_doi(paper_base_info, doi) -> None:
         comment=None,
     )
     assert paper.doi == doi
-
-
-@pytest.mark.parametrize(
-    "invalid_doi",
-    [
-        "11.1234/test.123",  # Not starting with 10
-        "10.123/test.123",  # Too few digits
-        "test.123",  # Invalid format
-    ],
-)
-def test_invalid_doi(paper_base_info, invalid_doi) -> None:
-    """Test paper model with invalid DOI"""
-    with pytest.raises(ValidationError):
-        Paper(
-            info=paper_base_info,
-            doi=invalid_doi,
-            journal_ref=None,
-            pdf_url=None,
-            comment=None,
-        )
 
 
 @pytest.mark.parametrize(
@@ -88,13 +74,13 @@ def test_invalid_doi(paper_base_info, invalid_doi) -> None:
     ],
 )
 def test_metadata_duration(start, end, expected_seconds, expected_ms) -> None:
-    """测试元数据持续时间计算"""
+    """Test metadata duration computation"""
     metadata = Metadata(
         start_time=start,
         end_time=end,
         missing_results=0,
         pagesize=20,
-        source=URL("http://test.com"),
+        source="http://test.com",
     )
     assert metadata.duration_seconds == expected_seconds
     assert metadata.duration_ms == expected_ms
@@ -102,7 +88,7 @@ def test_metadata_duration(start, end, expected_seconds, expected_ms) -> None:
 
 @pytest.mark.parametrize("papers_count", [0, 1, 5])
 def test_search_result_papers_count(papers_count, paper_base_info) -> None:
-    """测试搜索结果论文数量计算"""
+    """Test search result papers_count computed field"""
     papers = [
         Paper(
             info=paper_base_info,
@@ -127,7 +113,7 @@ def test_search_result_papers_count(papers_count, paper_base_info) -> None:
             sort_order=None,
         ),
         metadata=Metadata(
-            missing_results=0, pagesize=20, source=URL("http://test.com"), end_time=None
+            missing_results=0, pagesize=20, source="http://test.com", end_time=None
         ),
     )
     assert result.papers_count == papers_count

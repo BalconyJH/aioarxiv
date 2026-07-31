@@ -1,6 +1,5 @@
-import inspect
-import logging
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, cast
+from typing_extensions import Self
 
 import loguru
 
@@ -28,13 +27,13 @@ usage:
 
 
 class ConfigManager:
-    _instance = None
-    _config: Optional[ArxivConfig] = None
+    _instance: "ConfigManager | None" = None
+    _config: ArxivConfig | None = None
 
-    def __new__(cls):
+    def __new__(cls) -> Self:
         if cls._instance is None:
             cls._instance = super().__new__(cls)
-        return cls._instance
+        return cast("Self", cls._instance)
 
     @classmethod
     def set_config(cls, config: ArxivConfig) -> None:
@@ -45,30 +44,7 @@ class ConfigManager:
         return cls._config or default_config
 
 
-# https://loguru.readthedocs.io/en/stable/overview.html#entirely-compatible-with-standard-logging
-class LoguruHandler(logging.Handler):  # pragma: no cover
-    """
-    A handler class which allows the use of Loguru in Python's standard logging module.
-    """
-
-    def emit(self, record: logging.LogRecord) -> None:
-        try:
-            level = logger.level(record.levelname).name
-        except ValueError:
-            level = record.levelno
-
-        frame, depth = inspect.currentframe(), 0
-        while frame and (depth == 0 or frame.f_code.co_filename == logging.__file__):
-            frame = frame.f_back
-            depth += 1
-
-        logger.opt(depth=depth, exception=record.exc_info).log(
-            level,
-            record.getMessage(),
-        )
-
-
-def default_filter(record: "Record"):
+def default_filter(record: "Record") -> bool:
     """default loguru filter function, change log level by config.log_level"""
     log_level = record["extra"].get("arxiv_log_level")
 
@@ -87,14 +63,3 @@ default_format: str = (
     "<c>{function}:{line}</c>| "
     "{message}"
 )
-
-# logger.remove()
-# logger_id = logger.add(
-#     sys.stdout,
-#     level=0,
-#     diagnose=False,
-#     filter=default_filter,
-#     format=default_format,
-# )
-
-__autodoc__ = {"logger_id": False}

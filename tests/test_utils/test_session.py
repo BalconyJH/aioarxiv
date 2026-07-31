@@ -1,8 +1,11 @@
 import asyncio
-from collections.abc import AsyncGenerator
-from typing import Any
+from collections.abc import Awaitable, Callable
+from itertools import pairwise
+from types import SimpleNamespace
+from typing import Any, cast
 
-from aiohttp import ClientResponse, ClientSession
+from aiohttp import ClientSession
+from pydantic import ValidationError
 import pytest
 from pytest_mock import MockerFixture
 
@@ -10,9 +13,37 @@ from aioarxiv.config import ArxivConfig
 from aioarxiv.utils.session import SessionManager
 
 
+class FakeClientSession:
+    """Minimal stand-in for aiohttp.ClientSession.
+
+    Records every request and optionally awaits a side-effect hook inside the
+    request body, letting tests observe timing and in-flight concurrency
+    without any network access.
+    """
+
+    def __init__(self, hook: Callable[[], Awaitable[None]] | None = None) -> None:
+        self.closed = False
+        self.calls: list[tuple[str, str, dict[str, Any]]] = []
+        self._hook = hook
+
+    async def request(self, method: str, url: str, **kwargs: Any) -> Any:
+        self.calls.append((method, url, kwargs))
+        if self._hook is not None:
+            await self._hook()
+        return SimpleNamespace(status=200)
+
+    async def close(self) -> None:
+        self.closed = True
+
+
+def as_client_session(fake: FakeClientSession) -> ClientSession:
+    """Cast a fake session to the ClientSession type expected by SessionManager."""
+    return cast("ClientSession", fake)
+
+
 @pytest.fixture
-def config() -> ArxivConfig:
-    """Create a test configuration.
+def proxy_config() -> ArxivConfig:
+    """Create a test configuration with a proxy.
 
     Returns:
         ArxivConfig: Test configuration with custom timeout and proxy.
@@ -25,195 +56,176 @@ def config() -> ArxivConfig:
     )
 
 
-@pytest.fixture
-async def mock_session(mocker: MockerFixture) -> AsyncGenerator[Any, None]:
-    """Create a mock aiohttp ClientSession.
+@pytest.mark.asyncio
+async def test_basic_request() -> None:
+    """Test that request() forwards method, url and returns the response."""
+    fake = FakeClientSession()
 
-    Args:
-        mocker: pytest-mock fixture
+    manager = SessionManager(session=as_client_session(fake))
+    response = await manager.request("GET", "http://example.com")
 
-    Yields:
-        Any: Mocked ClientSession with async request method.
-    """
-
-    def async_return(*args: Any, **kwargs: Any) -> asyncio.Future[Any]:  # noqa: ARG001
-        future = asyncio.Future()
-        future.set_result(None)
-        return future
-
-    session = mocker.Mock(spec=ClientSession)
-    session.request = mocker.Mock(side_effect=async_return)
-    session.close = mocker.Mock(side_effect=async_return)
-    session.closed = False
-    return session
-
-
-@pytest.fixture
-async def mock_response(mocker: MockerFixture) -> AsyncGenerator[Any, None]:
-    """Create a mock aiohttp ClientResponse.
-
-    Args:
-        mocker: pytest-mock fixture
-
-    Yields:
-        Any: Mocked ClientResponse.
-    """
-    response = mocker.Mock(spec=ClientResponse)
-    future = asyncio.Future()
-    future.set_result(response)
-    return response
+    assert response.status == 200
+    assert len(fake.calls) == 1
+    method, url, _kwargs = fake.calls[0]
+    assert method == "GET"
+    assert url == "http://example.com"
 
 
 @pytest.mark.asyncio
-async def test_basic_request(
-    mock_session: Any,
-    mock_response: Any,
-) -> None:
-    """Test basic request functionality.
+async def test_request_with_proxy(proxy_config: ArxivConfig) -> None:
+    """Test that the configured proxy is injected into request kwargs.
 
     Args:
-        mock_session: Mocked aiohttp session
-        mock_response: Mocked response
+        proxy_config: Test configuration with a proxy set.
     """
-    future = asyncio.Future()
-    future.set_result(mock_response)
-    mock_session.request.return_value = future
+    fake = FakeClientSession()
 
-    manager = SessionManager(session=mock_session)
+    manager = SessionManager(session=as_client_session(fake), config=proxy_config)
     await manager.request("GET", "http://example.com")
 
-    mock_session.request.assert_called_once()
-    args, _kwargs = mock_session.request.call_args
-    assert args[0] == "GET"
-    assert args[1] == "http://example.com"
-
-
-@pytest.mark.asyncio
-async def test_request_with_proxy(
-    mock_session: Any,
-    mock_response: Any,
-    config: ArxivConfig,
-) -> None:
-    """Test request with proxy configuration.
-
-    Args:
-        mock_session: Mocked aiohttp session
-        mock_response: Mocked response
-        config: Test configuration
-    """
-    future = asyncio.Future()
-    future.set_result(mock_response)
-    mock_session.request.return_value = future
-
-    manager = SessionManager(session=mock_session, config=config)
-    await manager.request("GET", "http://example.com")
-
-    mock_session.request.assert_called_once()
-    _, kwargs = mock_session.request.call_args
+    assert len(fake.calls) == 1
+    _method, _url, kwargs = fake.calls[0]
     assert kwargs.get("proxy") == "http://proxy.example.com"
 
 
 @pytest.mark.asyncio
-async def test_session_lifecycle(
-    mock_session: Any,
-) -> None:
-    """Test session manager lifecycle.
+async def test_session_lifecycle() -> None:
+    """Test that the context manager closes the underlying session on exit."""
+    fake = FakeClientSession()
 
-    Args:
-        mock_session: Mocked aiohttp session
-    """
-    async with SessionManager(session=mock_session) as manager:
-        assert not mock_session.closed
+    async with SessionManager(session=as_client_session(fake)) as manager:
         await manager.request("GET", "http://example.com")
+        assert not fake.closed
 
-    mock_session.close.assert_called_once()
+    assert fake.closed
 
 
 @pytest.mark.asyncio
-async def test_rate_limiting(
-    mocker: MockerFixture,
-    mock_response: Any,
-) -> None:
-    """Test rate limiting behavior.
+async def test_closed_session_recreated(mocker: MockerFixture) -> None:
+    """Test lazy session creation and recreation after the session is closed.
 
     Args:
-        mocker: pytest-mock fixture
-        mock_response: Mocked response
-
-    This test verifies that:
-    1. Rate limiting is properly applied
-    2. Sleep is called with correct duration
-    3. All requests are completed
+        mocker: pytest-mock fixture.
     """
-    # Test parameters
-    calls = 2
-    period = 1.0
-    total_requests = 3
+    created: list[FakeClientSession] = []
 
+    def factory(**kwargs: Any) -> FakeClientSession:  # noqa: ARG001
+        fake = FakeClientSession()
+        created.append(fake)
+        return fake
+
+    mocker.patch("aioarxiv.utils.session.ClientSession", side_effect=factory)
+    mocker.patch("aioarxiv.utils.session.TCPConnector")
+
+    # Rate limiting disabled so sequential requests do not wait out the
+    # default 3 s spacing.
+    config = ArxivConfig(rate_limit_period=0.0)
+    manager = SessionManager(config=config)
+
+    await manager.request("GET", "http://example.com")
+    await manager.request("GET", "http://example.com")
+    assert len(created) == 1, "Session should be created lazily and reused"
+    assert len(created[0].calls) == 2
+
+    created[0].closed = True
+    await manager.request("GET", "http://example.com")
+    assert len(created) == 2, "A closed session should be replaced"
+    assert len(created[1].calls) == 1
+
+    await manager.close()
+    assert created[1].closed
+
+
+@pytest.mark.asyncio
+async def test_request_spacing() -> None:
+    """Test strict spacing between request starts.
+
+    With calls=1 and period=0.3, concurrent requests must start at least
+    ~0.3 s apart (the first one immediately).
+    """
+    config = ArxivConfig(
+        rate_limit_calls=1,
+        rate_limit_period=0.3,
+        max_concurrent_requests=5,
+    )
+    loop = asyncio.get_running_loop()
+    start_times: list[float] = []
+
+    async def record_start() -> None:
+        start_times.append(loop.time())
+
+    fake = FakeClientSession(hook=record_start)
+    manager = SessionManager(session=as_client_session(fake), config=config)
+
+    await asyncio.gather(
+        *(manager.request("GET", "http://example.com") for _ in range(3))
+    )
+
+    assert len(start_times) == 3
+    gaps = [later - earlier for earlier, later in pairwise(sorted(start_times))]
+    assert all(gap >= 0.29 for gap in gaps), f"Requests too close together: {gaps}"
+
+
+@pytest.mark.asyncio
+async def test_concurrency_cap() -> None:
+    """Test that in-flight requests never exceed max_concurrent_requests."""
+    config = ArxivConfig(
+        rate_limit_calls=1,
+        rate_limit_period=0.0,  # disable rate limiting to isolate the semaphore
+        max_concurrent_requests=2,
+    )
+    in_flight = 0
+    peak = 0
+
+    async def track_in_flight() -> None:
+        nonlocal in_flight, peak
+        in_flight += 1
+        peak = max(peak, in_flight)
+        await asyncio.sleep(0.05)
+        in_flight -= 1
+
+    fake = FakeClientSession(hook=track_in_flight)
+    manager = SessionManager(session=as_client_session(fake), config=config)
+
+    await asyncio.gather(
+        *(manager.request("GET", "http://example.com") for _ in range(6))
+    )
+
+    assert peak <= 2, f"In-flight requests ({peak}) exceeded the limit (2)"
+    assert peak == 2, "Semaphore should allow the full concurrency budget"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("calls", "period"), [(0, 3.0), (1, 0.0)])
+async def test_degenerate_config_disables_rate_limiting(
+    calls: int, period: float
+) -> None:
+    """Test that zero calls or zero period disables throttling entirely.
+
+    Args:
+        calls: Rate limit call budget under test.
+        period: Rate limit window under test.
+    """
     config = ArxivConfig(
         rate_limit_calls=calls,
         rate_limit_period=period,
+        max_concurrent_requests=10,
     )
+    fake = FakeClientSession()
+    manager = SessionManager(session=as_client_session(fake), config=config)
 
-    # Mock sleep without actual waiting
-    sleep_durations = []
-
-    async def mock_sleep(duration: float) -> None:
-        sleep_durations.append(duration)
-
-    mocker.patch("asyncio.sleep", side_effect=mock_sleep)
-
-    # Mock request
-    async def mock_request(*args: Any, **kwargs: Any) -> Any:  # noqa: ARG001
-        return mock_response
-
-    mocker.patch("aiohttp.ClientSession.request", side_effect=mock_request)
-
-    # Execute requests
-    async with SessionManager(config=config) as manager:
-        tasks = [
-            manager.request("GET", "http://example.com") for _ in range(total_requests)
-        ]
-        await asyncio.gather(*tasks)
-
-    # Verify results
-    assert len(sleep_durations) == total_requests - calls, (
-        f"Expected {total_requests - calls} rate limit delays, "
-        f"got {len(sleep_durations)}"
+    loop = asyncio.get_running_loop()
+    start = loop.time()
+    await asyncio.gather(
+        *(manager.request("GET", "http://example.com") for _ in range(5))
     )
+    elapsed = loop.time() - start
 
-    # Verify sleep durations
-    if sleep_durations:
-        assert all(0 < d <= period for d in sleep_durations), (
-            f"Invalid sleep duration(s): {sleep_durations}"
-        )
+    assert len(fake.calls) == 5
+    assert elapsed < 0.25, f"Requests should not be throttled, took {elapsed:.3f}s"
 
 
-@pytest.mark.asyncio
-async def test_concurrent_requests_limit(config: ArxivConfig) -> None:
-    """Test concurrent request limiting.
-
-    Args:
-        config: Test configuration
-    """
-    concurrent_count = 0
-    max_concurrent = 0
-    semaphore = asyncio.Semaphore(config.rate_limit_calls)
-
-    async with SessionManager(config=config):
-
-        async def test_request() -> None:
-            nonlocal concurrent_count, max_concurrent
-            async with semaphore:
-                concurrent_count += 1
-                max_concurrent = max(max_concurrent, concurrent_count)
-                await asyncio.sleep(0.01)  # 使用更短的睡眠时间
-                concurrent_count -= 1
-
-        tasks = [test_request() for _ in range(10)]
-        await asyncio.gather(*tasks)
-
-    assert max_concurrent <= config.rate_limit_calls, (
-        f"Max concurrent requests ({max_concurrent}) exceeded "
-        f"limit ({config.rate_limit_calls})"
-    )
+def test_max_concurrent_below_one_rejected() -> None:
+    """Test that max_concurrent_requests < 1 is rejected at config validation."""
+    with pytest.raises(ValidationError):
+        ArxivConfig(max_concurrent_requests=0)

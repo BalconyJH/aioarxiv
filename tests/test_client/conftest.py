@@ -7,7 +7,6 @@ from aiohttp import ClientResponse
 from pydantic import AnyUrl, HttpUrl
 import pytest
 from pytest_mock import MockerFixture
-from yarl import URL
 
 from aioarxiv.client.arxiv_client import ArxivClient
 from aioarxiv.client.downloader import ArxivDownloader
@@ -58,7 +57,7 @@ def sample_category() -> Category:
 
 @pytest.fixture
 def sample_basic_info(
-    sample_author: Author, sample_category: Category, mock_datetime: datetime
+    sample_author: Author, sample_category: Category, fixed_datetime: datetime
 ) -> BasicInfo:
     """
     Create sample basic information for a paper
@@ -66,7 +65,7 @@ def sample_basic_info(
     Args:
         sample_author: The sample author fixture
         sample_category: The sample category fixture
-        mock_datetime: The mocked datetime fixture
+        fixed_datetime: The mocked datetime fixture
 
     Returns:
         BasicInfo: Basic information for a test paper
@@ -77,8 +76,8 @@ def sample_basic_info(
         summary="Test paper summary",
         authors=[sample_author],
         categories=sample_category,
-        published=mock_datetime,
-        updated=mock_datetime,
+        published=fixed_datetime,
+        updated=fixed_datetime,
     )
 
 
@@ -103,21 +102,21 @@ def sample_paper(sample_basic_info: BasicInfo) -> Paper:
 
 
 @pytest.fixture
-def sample_metadata(mock_datetime: datetime) -> Metadata:
+def sample_metadata(fixed_datetime: datetime) -> Metadata:
     """
     Create sample metadata for testing
 
     Args:
-        mock_datetime: The mocked datetime fixture
+        fixed_datetime: The mocked datetime fixture
 
     Returns:
         Metadata: Metadata object with test values
     """
     return Metadata(
-        start_time=mock_datetime,
+        start_time=fixed_datetime,
         missing_results=0,
         pagesize=10,
-        source=URL("http://export.arxiv.org/api/query"),
+        source="http://export.arxiv.org/api/query",
         end_time=None,
     )
 
@@ -192,27 +191,24 @@ def mock_response(mocker: MockerFixture, sample_arxiv_feed: str) -> Any:
     response.status = 200
     response.text = mocker.AsyncMock(return_value=sample_arxiv_feed)
     response.url = "http://export.arxiv.org/api/query"
+    response.headers = {}
     return response
 
 
 @pytest.fixture
-def mock_datetime(mocker: MockerFixture) -> datetime:
+def fixed_datetime() -> datetime:
     """
-    Mock datetime.now() and return a fixed time (2025-01-02 13:37:50 UTC)
+    Provide a fixed timestamp (2025-01-02 13:37:50 UTC) for deterministic models.
 
-    Args:
-        mocker: pytest mocker fixture
+    Every aioarxiv module binds ``from datetime import datetime`` at import, so
+    patching ``datetime.datetime`` would intercept nothing in the library while
+    replacing the stdlib type globally. Consumers only need a constant, so this
+    returns one directly.
 
     Returns:
         datetime: Fixed datetime object for testing
     """
-    fixed_dt = datetime(2025, 1, 2, 13, 37, 50, tzinfo=ZoneInfo("UTC"))
-    datetime_mock = mocker.patch("datetime.datetime")
-    datetime_mock.now.return_value = fixed_dt
-    datetime_mock.now.side_effect = (
-        lambda tz=None: fixed_dt.astimezone(tz) if tz else fixed_dt
-    )
-    return fixed_dt
+    return datetime(2025, 1, 2, 13, 37, 50, tzinfo=ZoneInfo("UTC"))
 
 
 @pytest.fixture

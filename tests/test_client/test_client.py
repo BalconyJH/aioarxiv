@@ -4,13 +4,13 @@ from uuid import UUID
 from zoneinfo import ZoneInfo
 
 import pytest
-from yarl import URL
 
-from aioarxiv.client.arxiv_client import ArxivClient
-from aioarxiv.exception import QueryBuildError
+from aioarxiv.client.arxiv_client import MAX_TOTAL_RESULTS, ArxivClient
+from aioarxiv.exception import HTTPException, QueryBuildError, RateLimitException
 from aioarxiv.models import (
     BasicInfo,
     Metadata,
+    PageParam,
     Paper,
     SearchParams,
     SearchResult,
@@ -87,34 +87,34 @@ async def test_build_search_metadata(
         end_time=datetime.now(tz=ZoneInfo(mock_config.timezone)),
         missing_results=0,
         pagesize=10,
-        source=URL("http://export.arxiv.org/api/query"),
+        source="http://export.arxiv.org/api/query",
     )
 
     search_result = sample_search_result.model_copy(update={"metadata": metadata})
 
     updated_result = mock_arxiv_client._build_search_result_metadata(
-        search_result, page=1, batch_size=10, papers=[sample_paper]
+        search_result, page=1, papers=[sample_paper]
     )
 
     assert len(updated_result.papers) == 1
     assert updated_result.page == 1
     assert updated_result.has_next is False
     assert updated_result.metadata.pagesize == mock_arxiv_client._config.page_size
-    assert isinstance(updated_result.metadata.source, URL)
+    assert isinstance(updated_result.metadata.source, str)
 
 
 @pytest.mark.asyncio
-async def test_metadata_duration_calculation(mock_datetime):
+async def test_metadata_duration_calculation(fixed_datetime):
     """Test metadata duration calculation"""
-    start_time = mock_datetime
-    end_time = mock_datetime + timedelta(seconds=1)
+    start_time = fixed_datetime
+    end_time = fixed_datetime + timedelta(seconds=1)
 
     metadata = Metadata(
         start_time=start_time,
         end_time=end_time,
         missing_results=0,
         pagesize=10,
-        source=URL("http://test.com"),
+        source="http://test.com",
     )
 
     assert metadata.duration_seconds == 1.000
@@ -139,6 +139,7 @@ async def test_search_with_query(mock_arxiv_client, mocker, sample_search_result
     assert isinstance(result, SearchResult)
     assert search_by_query.call_args.kwargs == {
         "query": "physics",
+        "id_list": None,
         "max_results": 10,
         "sort_by": SortCriterion.SUBMITTED,
         "sort_order": SortOrder.ASCENDING,
@@ -157,7 +158,13 @@ async def test_search_with_id_list(mock_arxiv_client, mocker, sample_search_resu
     result = await mock_arxiv_client.search(id_list=id_list, start=0)
 
     assert isinstance(result, SearchResult)
-    assert search_by_ids.call_args.kwargs == {"id_list": id_list, "start": 0}
+    assert search_by_ids.call_args.kwargs == {
+        "id_list": id_list,
+        "start": 0,
+        "max_results": None,
+        "sort_by": None,
+        "sort_order": None,
+    }
 
 
 @pytest.mark.asyncio
@@ -208,6 +215,7 @@ async def test_search_by_query_single_page(
     assert result == sample_search_result
     prepare_mock.assert_called_once_with(
         query="test",
+        id_list=None,
         start=None,
         max_results=None,
         sort_by=None,
@@ -232,6 +240,9 @@ async def test_search_by_ids(mock_arxiv_client, sample_search_result, mocker):
     prepare_mock.assert_called_once_with(
         id_list=id_list,
         start=0,
+        max_results=None,
+        sort_by=None,
+        sort_order=None,
     )
 
 
@@ -268,7 +279,7 @@ async def test_search_by_query_multi_page(
     batch_mock = mocker.patch.object(
         mock_arxiv_client,
         "_fetch_batch_results",
-        return_value=[sample_search_result],
+        return_value=([sample_search_result], 0),
     )
     aggregate_mock = mocker.patch.object(
         mock_arxiv_client,
@@ -286,6 +297,7 @@ async def test_search_by_query_multi_page(
 
     prepare_mock.assert_called_once_with(
         query="test query",
+        id_list=None,
         start=0,
         max_results=100,
         sort_by=SortCriterion.SUBMITTED,
@@ -340,14 +352,14 @@ async def test_aggregate_search_results(mock_arxiv_client, mock_config):
         end_time=datetime(2024, 1, 2, tzinfo=ZoneInfo(mock_config.timezone)),
         missing_results=1,
         pagesize=10,
-        source=URL("http://test1.com"),
+        source="http://test1.com",
     )
     metadata2 = Metadata(
         start_time=datetime(2024, 1, 2, tzinfo=ZoneInfo(mock_config.timezone)),
         end_time=datetime(2024, 1, 3, tzinfo=ZoneInfo(mock_config.timezone)),
         missing_results=2,
         pagesize=20,
-        source=URL("http://test2.com"),
+        source="http://test2.com",
     )
 
     # Create search results
@@ -499,3 +511,196 @@ async def test_prepare_initial_search_needs_more(
     assert needs_more is True
     fetch_mock.assert_called_once()
     assert result.total_result == 100
+
+
+@pytest.mark.asyncio
+async def test_search_without_query_and_id_list(mock_arxiv_client):
+    """Search with neither query nor id_list raises QueryBuildError"""
+    with pytest.raises(QueryBuildError, match="query or id_list"):
+        await mock_arxiv_client.search()
+
+
+@pytest.mark.asyncio
+async def test_search_exceeding_result_window(mock_arxiv_client):
+    """Search beyond the 30000-result window raises QueryBuildError upfront"""
+    with pytest.raises(QueryBuildError, match=str(MAX_TOTAL_RESULTS)):
+        await mock_arxiv_client.search(
+            query="physics", start=MAX_TOTAL_RESULTS - 50, max_results=100
+        )
+
+    mock_arxiv_client._session_manager.request.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_search_combined_query_and_id_list(
+    mock_arxiv_client, sample_search_result, mocker
+):
+    """Combined query + id_list sends both search_query and id_list params"""
+    fetch_mock = mocker.patch.object(
+        mock_arxiv_client, "_fetch_page", return_value=mocker.AsyncMock()
+    )
+    mocker.patch(
+        "aioarxiv.client.arxiv_client.ArxivParser",
+        return_value=mocker.Mock(build_search_result=lambda _: sample_search_result),
+    )
+
+    id_list = ["2101.00123", "2101.00124"]
+    result = await mock_arxiv_client.search(query="all:electron", id_list=id_list)
+
+    assert isinstance(result, SearchResult)
+    fetch_mock.assert_called_once()
+    params = fetch_mock.call_args.args[0]
+    assert params.query == "all:electron"
+    assert params.id_list == id_list
+
+    query_params = mock_arxiv_client._build_query_params(params)
+    assert query_params["search_query"] == "all:electron"
+    assert query_params["id_list"] == "2101.00123,2101.00124"
+
+
+@pytest.mark.asyncio
+async def test_fetch_page_rate_limited(mock_arxiv_client, mocker):
+    """HTTP 429 raises RateLimitException with parsed Retry-After"""
+    response = mocker.Mock()
+    response.status = 429
+    response.headers = {"Retry-After": "7"}
+    mock_arxiv_client._session_manager.request = mocker.AsyncMock(return_value=response)
+
+    with pytest.raises(RateLimitException) as exc_info:
+        await mock_arxiv_client._fetch_page(SearchParams(query="test"))
+
+    assert exc_info.value.retry_after == 7
+    assert exc_info.value.status_code == 429
+
+
+@pytest.mark.asyncio
+async def test_fetch_batch_results_tracks_missing(mock_arxiv_client, mocker):
+    """Failed pages are counted into missing_results instead of being swallowed"""
+    page_params = [PageParam(start=10, end=20), PageParam(start=20, end=30)]
+
+    mocker.patch.object(
+        mock_arxiv_client,
+        "_fetch_and_update_result",
+        side_effect=RuntimeError("boom"),
+    )
+
+    results, missing = await mock_arxiv_client._fetch_batch_results(
+        query="test",
+        page_params=page_params,
+        sort_by=None,
+        sort_order=None,
+    )
+
+    assert results == []
+    assert missing == 20
+
+
+@pytest.mark.asyncio
+async def test_rate_limit_disabled_zero_calls(mock_config):
+    """rate_limit_calls=0 disables the interval check without ZeroDivisionError"""
+    config = mock_config.model_copy(update={"rate_limit_calls": 0})
+    # Must not raise ZeroDivisionError while computing average_interval.
+    ArxivClient(config=config)
+
+
+@pytest.mark.asyncio
+async def test_build_search_metadata_has_next_respects_start(
+    mock_arxiv_client, sample_search_result, sample_paper
+):
+    """has_next compares total against the absolute window end, not page length"""
+    # Window [90, 100) fully consumes a 100-match result: no next page.
+    result = sample_search_result.model_copy(
+        update={
+            "total_result": 100,
+            "query_params": sample_search_result.query_params.model_copy(
+                update={"start": 90}
+            ),
+        }
+    )
+
+    updated = mock_arxiv_client._build_search_result_metadata(
+        result, page=1, papers=[sample_paper] * 10
+    )
+
+    assert updated.has_next is False
+
+
+@pytest.mark.asyncio
+async def test_search_by_query_continues_from_consumed_window(
+    mock_arxiv_client, sample_search_result, sample_paper, mocker
+):
+    """Follow-up pages resume from start+received, not from config.page_size"""
+    first_page = sample_search_result.model_copy(
+        update={
+            "total_result": 500,
+            "papers": [sample_paper] * 30,
+            "query_params": sample_search_result.query_params.model_copy(
+                update={"start": 5}
+            ),
+        }
+    )
+    mocker.patch.object(
+        mock_arxiv_client,
+        "_prepare_initial_search",
+        return_value=(first_page, True),
+    )
+    gen_mock = mocker.patch.object(
+        mock_arxiv_client, "_generate_page_params", return_value=[]
+    )
+    mocker.patch.object(mock_arxiv_client, "_fetch_batch_results", return_value=([], 0))
+    mocker.patch.object(
+        mock_arxiv_client, "aggregate_search_results", return_value=first_page
+    )
+
+    await mock_arxiv_client._search_by_query(query="test", max_results=200, start=5)
+
+    # consumed_end = start(5) + received(30) = 35, not config.page_size.
+    assert gen_mock.call_args.kwargs["base_start"] == 35
+
+
+@pytest.mark.asyncio
+async def test_prepare_initial_search_no_more_when_window_covers_total(
+    mock_arxiv_client, sample_search_result, sample_paper, mocker
+):
+    """needs_more is False once start+received already reaches total_result"""
+    result = sample_search_result.model_copy(
+        update={"total_result": 50, "papers": [sample_paper] * 10}
+    )
+    mocker.patch.object(
+        mock_arxiv_client, "_fetch_page", return_value=mocker.AsyncMock()
+    )
+    mocker.patch(
+        "aioarxiv.client.arxiv_client.ArxivParser",
+        return_value=mocker.Mock(build_search_result=lambda _: result),
+    )
+
+    _, needs_more = await mock_arxiv_client._prepare_initial_search(
+        query="test", start=45, max_results=100
+    )
+
+    # start(45) + received(10) = 55 >= total(50): nothing left to fetch.
+    assert needs_more is False
+
+
+@pytest.mark.asyncio
+async def test_fetch_page_400_releases_connection(mock_arxiv_client, mocker):
+    """HTTP 400 releases the connection and raises HTTPException(400)"""
+    response = mocker.Mock()
+    response.status = 400
+    response.headers = {}
+    mock_arxiv_client._session_manager.request = mocker.AsyncMock(return_value=response)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await mock_arxiv_client._fetch_page(SearchParams(query="test"))
+
+    assert exc_info.value.status_code == 400
+    response.release.assert_called_once()
+
+
+def test_generate_page_params_clamps_final_window(mock_arxiv_client):
+    """The last page never overruns base_start + remaining_papers"""
+    params = mock_arxiv_client._generate_page_params(
+        base_start=30, remaining_papers=25, page_size=10
+    )
+
+    assert [(p.start, p.end) for p in params] == [(30, 40), (40, 50), (50, 55)]

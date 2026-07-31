@@ -2,14 +2,18 @@ import asyncio
 from datetime import datetime
 from pathlib import Path
 from types import TracebackType
-from typing import Optional
-from typing_extensions import overload
+from typing_extensions import Self, overload
 from zoneinfo import ZoneInfo
 
-from aiohttp import ClientResponse
+from aiohttp import ClientResponse, ServerTimeoutError
 
 from aioarxiv.config import ArxivConfig, default_config
-from aioarxiv.exception import HTTPException, QueryBuildError
+from aioarxiv.exception import (
+    HTTPException,
+    QueryBuildError,
+    RateLimitException,
+    TimeoutException,
+)
 from aioarxiv.models import (
     Metadata,
     PageParam,
@@ -26,15 +30,19 @@ from aioarxiv.utils.session import SessionManager
 
 from .downloader import ArxivDownloader, DownloadTracker
 
+MAX_TOTAL_RESULTS = 30000
+"""Deep-paging cap of the arXiv API: requests with
+``start + max_results > 30000`` are rejected with HTTP 400."""
+
 
 class ArxivClient:
     def __init__(
         self,
-        config: Optional[ArxivConfig] = None,
-        session_manager: Optional[SessionManager] = None,
+        config: ArxivConfig | None = None,
+        session_manager: SessionManager | None = None,
         *,
         enable_downloader: bool = False,
-        download_dir: Optional[Path] = None,
+        download_dir: Path | None = None,
     ) -> None:
         """Initialize ArxivClient with optional configuration.
 
@@ -48,13 +56,16 @@ class ArxivClient:
         self._session_manager = session_manager or SessionManager(config=self._config)
         self.download_dir = download_dir
         self._enable_downloader = enable_downloader
-        self._downloader: Optional[ArxivDownloader] = None
+        self._downloader: ArxivDownloader | None = None
         ConfigManager.set_config(config=self._config)
         logger.info(f"ArxivClient initialized with config: {self._config.model_dump()}")
+        if self._config.rate_limit_calls <= 0 or self._config.rate_limit_period <= 0:
+            # rate_limit_calls == 0 disables rate limiting; no interval to check.
+            return
         average_interval = (
             self._config.rate_limit_period / self._config.rate_limit_calls
         )
-        if self._config.rate_limit_period > 0 and average_interval < 3.0:
+        if average_interval < 3.0:
             logger.warning(
                 f"Configuration for rate limit calls and period ({average_interval}/s) may cause rate limiting due to "
                 f"arXiv API policy which limits to 1 request every 3 seconds. "
@@ -63,7 +74,7 @@ class ArxivClient:
             )
 
     @property
-    def downloader(self) -> Optional[ArxivDownloader]:
+    def downloader(self) -> ArxivDownloader | None:
         """Get the downloader instance if enabled."""
         if not self._enable_downloader:
             logger.debug("Downloader is disabled")
@@ -80,7 +91,6 @@ class ArxivClient:
         self,
         searchresult: SearchResult,
         page: int,
-        batch_size: int,
         papers: list[Paper],
     ) -> SearchResult:
         """Build search result metadata with updated information.
@@ -88,16 +98,17 @@ class ArxivClient:
         Args:
             searchresult (SearchResult): Search result object.
             page (int): Page number of the search result.
-            batch_size (int): Number of papers fetched in the batch.
             papers (list[Paper]): List of papers fetched in the batch.
 
         Returns:
             SearchResult: Search result object with updated metadata.
         """
-        has_next = searchresult.total_result > (page * batch_size)
+        # More results exist beyond the absolute window this page covers.
+        consumed_end = (searchresult.query_params.start or 0) + len(papers)
+        has_next = searchresult.total_result > consumed_end
         metadata = searchresult.metadata.model_copy(
             update={
-                "end_time": datetime.now(tz=ZoneInfo(default_config.timezone)),
+                "end_time": datetime.now(tz=ZoneInfo(self._config.timezone)),
                 "pagesize": self._config.page_size,
             },
         )
@@ -112,12 +123,12 @@ class ArxivClient:
 
     async def _prepare_initial_search(
         self,
-        query: Optional[str] = None,
-        start: Optional[int] = None,
-        id_list: Optional[list[str]] = None,
-        max_results: Optional[int] = None,
-        sort_by: Optional[SortCriterion] = None,
-        sort_order: Optional[SortOrder] = None,
+        query: str | None = None,
+        start: int | None = None,
+        id_list: list[str] | None = None,
+        max_results: int | None = None,
+        sort_by: SortCriterion | None = None,
+        sort_order: SortOrder | None = None,
     ) -> tuple[SearchResult, bool]:
         """
         Prepare the initial search request and fetch the first page of results.
@@ -133,17 +144,27 @@ class ArxivClient:
         Returns:
             tuple[SearchResult, bool]: Tuple containing search result and flag
             indicating whether more results need to be fetched.
+
+        Note:
+            ``query`` and ``id_list`` may be combined; the API then applies
+            ``search_query`` as a filter within ``id_list``.
         """
-        is_id_query = bool(id_list)
-        page_size = min(self._config.page_size, max_results or self._config.page_size)
+        # Clamp the first request to the deep-paging window as well: with
+        # max_results unset and start near the cap, a full page would end
+        # past MAX_TOTAL_RESULTS and draw HTTP 400.
+        page_size = min(
+            self._config.page_size,
+            max_results or self._config.page_size,
+            MAX_TOTAL_RESULTS - (start or 0),
+        )
 
         params = SearchParams(
-            query=None if is_id_query else query,
-            id_list=id_list if is_id_query else None,
+            query=query,
+            id_list=id_list,
             start=start,
             max_results=page_size,
-            sort_by=None if is_id_query else sort_by,
-            sort_order=None if is_id_query else sort_order,
+            sort_by=sort_by,
+            sort_order=sort_order,
         )
 
         response = await self._fetch_page(params)
@@ -157,15 +178,16 @@ class ArxivClient:
         result = self._build_search_result_metadata(
             searchresult=result,
             page=1,
-            batch_size=page_size,
             papers=result.papers,
         )
 
+        # total_result is an absolute match count, so compare it against the
+        # absolute end of the fetched window, not just the papers received.
         needs_more = (
-            not is_id_query
+            id_list is None
             and max_results is not None
             and max_results > len(result.papers)
-            and result.total_result > len(result.papers)
+            and result.total_result > (start or 0) + len(result.papers)
         )
 
         return result, needs_more
@@ -189,7 +211,6 @@ class ArxivClient:
         return self._build_search_result_metadata(
             searchresult=result,
             page=page,
-            batch_size=self._config.page_size,
             papers=result.papers,
         )
 
@@ -197,8 +218,8 @@ class ArxivClient:
         self,
         query: str,
         page_params: list[PageParam],
-        sort_by: Optional[SortCriterion] = None,
-        sort_order: Optional[SortOrder] = None,
+        sort_by: SortCriterion | None = None,
+        sort_order: SortOrder | None = None,
     ) -> list[asyncio.Task[SearchResult]]:
         """Create a list of tasks to fetch multiple pages of search results.
 
@@ -232,11 +253,11 @@ class ArxivClient:
     async def search(
         self,
         query: str,
-        id_list: None = ...,
-        max_results: Optional[int] = ...,
-        sort_by: Optional[SortCriterion] = ...,
-        sort_order: Optional[SortOrder] = ...,
-        start: Optional[int] = ...,
+        id_list: list[str] | None = ...,
+        max_results: int | None = ...,
+        sort_by: SortCriterion | None = ...,
+        sort_order: SortOrder | None = ...,
+        start: int | None = ...,
     ) -> SearchResult: ...
 
     @overload
@@ -244,23 +265,26 @@ class ArxivClient:
         self,
         query: None = ...,
         id_list: list[str] = ...,
-        max_results: Optional[int] = ...,
-        sort_by: Optional[SortCriterion] = ...,
-        sort_order: Optional[SortOrder] = ...,
-        start: Optional[int] = ...,
+        max_results: int | None = ...,
+        sort_by: SortCriterion | None = ...,
+        sort_order: SortOrder | None = ...,
+        start: int | None = ...,
     ) -> SearchResult: ...
 
     async def search(
         self,
-        query: Optional[str] = None,
-        id_list: Optional[list[str]] = None,
-        max_results: Optional[int] = None,
-        sort_by: Optional[SortCriterion] = None,
-        sort_order: Optional[SortOrder] = None,
-        start: Optional[int] = None,
+        query: str | None = None,
+        id_list: list[str] | None = None,
+        max_results: int | None = None,
+        sort_by: SortCriterion | None = None,
+        sort_order: SortOrder | None = None,
+        start: int | None = None,
     ) -> SearchResult:
         """
-        Search arXiv papers via either a keyword query or arXiv ID list.
+        Search arXiv papers via a keyword query, an arXiv ID list, or both.
+
+        When both ``query`` and ``id_list`` are given, the API applies the
+        query as a filter within the ID list.
 
         Args:
             query (Optional[str]): Keyword-based query string.
@@ -272,38 +296,70 @@ class ArxivClient:
 
         Returns:
             SearchResult: Search results object.
+
+        Raises:
+            QueryBuildError: If neither ``query`` nor ``id_list`` is given, or
+                the requested window exceeds the API's 30000-result cap.
         """
         try:
-            if query:
+            if query is None and not id_list:
+                raise QueryBuildError(
+                    "Either query or id_list (or both) must be provided"
+                )
+            self._validate_result_window(start, max_results)
+            if query is not None:
                 return await self._search_by_query(
                     query=query,
+                    id_list=id_list,
                     max_results=max_results,
                     sort_by=sort_by,
                     sort_order=sort_order,
                     start=start,
                 )
-            if id_list:
-                return await self._search_by_ids(
-                    id_list=id_list,
-                    start=start,
-                )
-            raise QueryBuildError(
-                "Search query build failed",
+            return await self._search_by_ids(
+                id_list=id_list or [],
+                max_results=max_results,
+                sort_by=sort_by,
+                sort_order=sort_order,
+                start=start,
             )
         except Exception as e:
-            logger.error(f"Search operation failed: {e!s}", exc_info=True)
+            logger.opt(exception=True).error(f"Search operation failed: {e!s}")
             raise
+
+    @staticmethod
+    def _validate_result_window(start: int | None, max_results: int | None) -> None:
+        """Reject windows the arXiv API would refuse with HTTP 400.
+
+        Args:
+            start (Optional[int]): Requested start index.
+            max_results (Optional[int]): Requested result count.
+
+        Raises:
+            QueryBuildError: If ``start`` reaches or ``start + max_results``
+                exceeds 30000.
+        """
+        requested_end = (start or 0) + (max_results or 0)
+        if (start or 0) >= MAX_TOTAL_RESULTS or requested_end > MAX_TOTAL_RESULTS:
+            raise QueryBuildError(
+                f"start + max_results must not exceed {MAX_TOTAL_RESULTS} "
+                f"(requested window ends at {requested_end}); the arXiv API "
+                "rejects deeper paging with HTTP 400. Refine the query or "
+                "request a smaller window."
+            )
 
     async def _search_by_query(
         self,
         query: str,
-        max_results: Optional[int] = None,
-        sort_by: Optional[SortCriterion] = None,
-        sort_order: Optional[SortOrder] = None,
-        start: Optional[int] = None,
+        id_list: list[str] | None = None,
+        max_results: int | None = None,
+        sort_by: SortCriterion | None = None,
+        sort_order: SortOrder | None = None,
+        start: int | None = None,
     ) -> SearchResult:
         first_page_result, should_fetch_more = await self._prepare_initial_search(
             query=query,
+            id_list=id_list,
             start=start,
             max_results=max_results,
             sort_by=sort_by,
@@ -314,40 +370,73 @@ class ArxivClient:
             return first_page_result
 
         papers_received = len(first_page_result.papers)
+        # Continue from what the first page actually consumed, not from
+        # config.page_size: the first request may have been clamped or the
+        # API may have returned a short page.
+        consumed_end = (start or 0) + papers_received
         remaining_papers = min(
             (max_results - papers_received)
             if max_results
             else first_page_result.total_result,
-            first_page_result.total_result - papers_received,
+            first_page_result.total_result - consumed_end,
+            MAX_TOTAL_RESULTS - consumed_end,
         )
 
         if remaining_papers <= 0:
             return first_page_result
 
         page_params = self._generate_page_params(
-            base_start=(start or 0) + self._config.page_size,
+            base_start=consumed_end,
             remaining_papers=remaining_papers,
             page_size=self._config.page_size,
         )
 
         logger.debug(f"Fetching {len(page_params)} additional pages")
 
-        additional_results = await self._fetch_batch_results(
+        additional_results, missing_results = await self._fetch_batch_results(
             query=query,
             page_params=page_params,
             sort_by=sort_by,
             sort_order=sort_order,
         )
 
-        return self.aggregate_search_results([first_page_result, *additional_results])
+        # Concurrent middle pages may legitimately come back short; count the
+        # aggregate shortfall against the requested window instead of
+        # pretending completeness.
+        fetched_additional = sum(len(result.papers) for result in additional_results)
+        shortfall = remaining_papers - fetched_additional - missing_results
+        if shortfall > 0:
+            missing_results += shortfall
+
+        aggregated = self.aggregate_search_results(
+            [first_page_result, *additional_results]
+        )
+        if missing_results:
+            aggregated = aggregated.model_copy(
+                update={
+                    "metadata": aggregated.metadata.model_copy(
+                        update={
+                            "missing_results": aggregated.metadata.missing_results
+                            + missing_results,
+                        }
+                    ),
+                }
+            )
+        return aggregated
 
     async def _search_by_ids(
         self,
         id_list: list[str],
-        start: Optional[int] = None,
+        max_results: int | None = None,
+        sort_by: SortCriterion | None = None,
+        sort_order: SortOrder | None = None,
+        start: int | None = None,
     ) -> SearchResult:
         result, _ = await self._prepare_initial_search(
             id_list=id_list,
+            max_results=max_results,
+            sort_by=sort_by,
+            sort_order=sort_order,
             start=start,
         )
         return result
@@ -362,17 +451,58 @@ class ArxivClient:
             ClientResponse: HTTP response from the arXiv API.
 
         Raises:
-            HTTPException: If the API request returns a non-200 status code.
+            RateLimitException: If the API responds with HTTP 429.
+            HTTPException: If the API request returns another non-200 status.
+            TimeoutException: If the request times out.
         """
         query_params = self._build_query_params(params)
-        response = await self._session_manager.request(
-            "GET", str(self._config.base_url), params=query_params
-        )
+        try:
+            response = await self._session_manager.request(
+                "GET", str(self._config.base_url), params=query_params
+            )
+        except (asyncio.TimeoutError, ServerTimeoutError) as e:
+            raise TimeoutException(
+                timeout=self._config.timeout,
+                proxy=self._config.proxy,
+                link=str(self._config.base_url),
+            ) from e
 
-        if response.status != 200:
-            raise HTTPException(response.status)
+        if response.status == 200:
+            return response
 
-        return response
+        # Return the connection to the pool before raising; status and
+        # headers stay readable after release.
+        response.release()
+        if response.status == 429:
+            raise RateLimitException(
+                retry_after=self._parse_retry_after(response.headers.get("Retry-After"))
+            )
+        if response.status == 400:
+            raise HTTPException(
+                400,
+                "arXiv API rejected the request (HTTP 400); this typically "
+                f"means start + max_results exceeded {MAX_TOTAL_RESULTS} or "
+                "the query is malformed.",
+            )
+        raise HTTPException(response.status)
+
+    @staticmethod
+    def _parse_retry_after(header_value: str | None) -> int | None:
+        """Parse a ``Retry-After`` header value in seconds form.
+
+        Args:
+            header_value (Optional[str]): Raw header value, if present.
+
+        Returns:
+            Optional[int]: Seconds to wait, or None if absent or in the
+            HTTP-date form.
+        """
+        if header_value is None:
+            return None
+        try:
+            return int(header_value)
+        except ValueError:
+            return None
 
     @staticmethod
     def _generate_page_params(
@@ -404,9 +534,9 @@ class ArxivClient:
         self,
         query: str,
         page_params: list[PageParam],
-        sort_by: Optional[SortCriterion],
-        sort_order: Optional[SortOrder],
-    ) -> list[SearchResult]:
+        sort_by: SortCriterion | None,
+        sort_order: SortOrder | None,
+    ) -> tuple[list[SearchResult], int]:
         """
         Fetch multiple pages of results from arXiv API.
 
@@ -417,23 +547,26 @@ class ArxivClient:
             sort_order (Optional[SortOrder]): Order of sorting.
 
         Returns:
-            list[SearchResult]: List of search results from batch requests.
+            tuple[list[SearchResult], int]: Successful page results and the
+            number of papers lost to failed pages.
         """
         tasks = await self._create_batch_tasks(query, page_params, sort_by, sort_order)
 
         if not tasks:
-            return []
+            return [], 0
 
         responses = await asyncio.gather(*tasks, return_exceptions=True)
-        valid_results = []
+        valid_results: list[SearchResult] = []
+        missing_results = 0
 
-        for response in responses:
+        for param, response in zip(page_params, responses, strict=True):
             if isinstance(response, SearchResult):
                 valid_results.append(response)
-            elif isinstance(response, Exception):
-                logger.error(f"Batch task failed: {response!s}", exc_info=True)
+            else:
+                missing_results += param.end - param.start
+                logger.opt(exception=response).error(f"Batch task failed: {response!s}")
 
-        return valid_results
+        return valid_results, missing_results
 
     def _build_query_params(self, search_params: SearchParams) -> dict[str, str]:
         """
@@ -478,8 +611,8 @@ class ArxivClient:
     async def download_paper(
         self,
         paper: Paper,
-        filename: Optional[str] = None,
-    ) -> Optional[None]:
+        filename: str | None = None,
+    ) -> Path | None:
         """Download a single paper from arXiv.
 
         Args:
@@ -488,19 +621,20 @@ class ArxivClient:
                 paper. Defaults to None.
 
         Returns:
-            Optional[None]: None if downloader is disabled.
+            Optional[Path]: Path of the downloaded file, or None if the
+            downloader is disabled.
 
         Raises:
             PaperDownloadException: If paper download fails.
         """
         if downloader := self.downloader:
-            await downloader.download_paper(paper, filename)
+            return await downloader.download_paper(paper, filename)
         return None
 
     async def download_search_result(
         self,
         search_result: SearchResult,
-    ) -> Optional[DownloadTracker]:
+    ) -> DownloadTracker | None:
         """Download all papers from a search result.
 
         Args:
@@ -610,19 +744,19 @@ class ArxivClient:
         """Close the client and cleanup resources."""
         await self._session_manager.close()
 
-    async def __aenter__(self) -> "ArxivClient":
+    async def __aenter__(self) -> Self:
         """Enter the async context manager.
 
         Returns:
-            ArxivClient: The client instance.
+            Self: The client instance.
         """
         return self
 
     async def __aexit__(
         self,
-        exc_type: Optional[type[BaseException]],
-        exc_val: Optional[BaseException],
-        exc_tb: Optional[TracebackType],
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
     ) -> None:
         """Exit the async context manager and cleanup resources.
 

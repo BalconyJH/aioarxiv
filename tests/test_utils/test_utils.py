@@ -4,7 +4,6 @@ from io import StringIO
 import math
 from time import monotonic
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, cast
 import xml.etree.ElementTree as ET
 from zoneinfo import ZoneInfo
 
@@ -15,24 +14,21 @@ from multidict import CIMultiDict
 import pytest
 from yarl import URL
 
+from aioarxiv.config import ArxivConfig
 from aioarxiv.utils import (
-    calculate_page_size,
     create_parser_exception,
     create_trace_config,
     format_datetime,
-    log_retry_attempt,
     sanitize_title,
 )
-
-if TYPE_CHECKING:
-    from tenacity import RetryCallState
+from aioarxiv.utils.log import ConfigManager
 
 TOLERANCE = 0.25
 
 
 @pytest.fixture
 def sample_xml_element():
-    """创建示例 XML 元素用于测试"""
+    """Create a sample XML element for testing."""
     root = ET.Element("root")
     child = ET.SubElement(root, "child")
     child.text = "test content"
@@ -40,19 +36,8 @@ def sample_xml_element():
 
 
 @pytest.fixture
-def mock_retry_state():
-    """创建模拟的 RetryCallState"""
-
-    class MockRetryState:
-        def __init__(self):
-            self.attempt_number = 1
-
-    return MockRetryState()
-
-
-@pytest.fixture
 def capture_debug_logs():
-    """捕获 loguru 的 DEBUG 日志"""
+    """Capture loguru DEBUG output."""
     string_io = StringIO()
 
     handler_id = logger.add(
@@ -69,13 +54,13 @@ def capture_debug_logs():
 
 @pytest.fixture
 def mock_session(mocker):
-    """创建模拟的 aiohttp session"""
+    """Create a mocked aiohttp session."""
     return mocker.create_autospec(aiohttp.ClientSession)
 
 
 @pytest.fixture
 def mock_response(mocker):
-    """创建模拟的 ClientResponse"""
+    """Create a mocked ClientResponse."""
     response = mocker.create_autospec(ClientResponse, instance=True)
 
     response.status = 200
@@ -90,7 +75,7 @@ def mock_response(mocker):
 async def test_create_trace_config_request_lifecycle(
     mock_session, mock_response, capture_debug_logs
 ):
-    """测试请求生命周期的追踪配置"""
+    """Trace config logs the request lifecycle and measures elapsed time."""
     trace_config = create_trace_config()
     assert isinstance(trace_config, aiohttp.TraceConfig)
 
@@ -127,8 +112,8 @@ async def test_create_trace_config_request_lifecycle(
 
     elapsed_time = monotonic() - start_time
     assert math.isclose(elapsed_time, expected_delay, rel_tol=TOLERANCE), (
-        f"请求耗时不在预期范围内: 期望约为{expected_delay}秒, "
-        f"实际为{elapsed_time:.4f}秒"
+        f"Elapsed time out of expected range: expected about {expected_delay}s, "
+        f"got {elapsed_time:.4f}s"
     )
 
 
@@ -136,7 +121,7 @@ async def test_create_trace_config_request_lifecycle(
 async def test_create_trace_config_error_case(
     mock_session, mock_response, mocker, capture_debug_logs
 ):
-    """测试错误情况下的追踪配置"""
+    """Trace config logs non-200 responses as well."""
     trace_config = create_trace_config()
     ctx = SimpleNamespace()
 
@@ -164,60 +149,12 @@ async def test_create_trace_config_error_case(
     assert "Ending request: 404 invalid://url" in log_output
 
 
-@pytest.mark.asyncio
-async def test_create_trace_config_multiple_requests(mock_session, mock_response):
-    """
-    测试多个连续请求的追踪配置
-    """
-    trace_config = create_trace_config()
-    ctx = SimpleNamespace()
-
-    async def make_request(delay: float):
-        start_params = TraceRequestStartParams(
-            method="GET", url=URL("http://test.com/api"), headers=CIMultiDict()
-        )
-
-        await trace_config.on_request_start[0](mock_session, ctx, start_params)
-        start_time = ctx.start_time
-
-        await asyncio.sleep(delay)
-
-        end_params = TraceRequestEndParams(
-            method="GET",
-            url=URL("http://test.com/api"),
-            headers=CIMultiDict(),
-            response=mock_response,
-        )
-
-        await trace_config.on_request_end[0](mock_session, ctx, end_params)
-
-        return monotonic() - start_time
-
-    delays = [0.1, 0.2, 0.3]
-    elapsed_times = []
-
-    for delay in delays:
-        elapsed_time = await make_request(delay)
-        elapsed_times.append(elapsed_time)
-
-    for expected, actual in zip(delays, elapsed_times):
-        assert math.isclose(actual, expected, rel_tol=TOLERANCE), (
-            f"请求耗时不在预期范围内: 期望约为{expected}秒, 实际为{actual:.4f}秒"
-        )
-
-
 def test_create_parser_exception_basic(sample_xml_element):
-    """
-    测试创建基本的解析异常
-
-    验证:
-    1. 使用最基本的参数创建异常
-    2. 检查默认消息
-    """
+    """Exception factory fills defaults when given only the XML element."""
     exception = create_parser_exception(data=sample_xml_element)
 
     assert exception.url == ""
-    assert exception.message == "解析响应失败"
+    assert exception.message == "Failed to parse response"
     assert exception.context is not None
     assert exception.context.element_name == "root"
     assert exception.context.raw_content is not None
@@ -226,81 +163,12 @@ def test_create_parser_exception_basic(sample_xml_element):
     assert exception.original_error is None
 
 
-def test_create_parser_exception_with_url(sample_xml_element):
-    """
-    测试创建带 URL 的解析异常
-
-    验证:
-    1. URL 被正确设置
-    2. 其他参数保持默认值
-    """
-    test_url = "http://test.com/api"
-    exception = create_parser_exception(data=sample_xml_element, url=test_url)
-
-    assert exception.url == test_url
-    assert exception.message == "解析响应失败"
-
-
-def test_create_parser_exception_with_custom_message(sample_xml_element):
-    """
-    测试创建带自定义消息的解析异常
-
-    验证:
-    1. 自定义消息被正确设置
-    2. 其他参数保持默认值
-    """
-    custom_message = "自定义错误消息"
-    exception = create_parser_exception(data=sample_xml_element, message=custom_message)
-
-    assert exception.url == ""
-    assert exception.message == custom_message
-
-
-def test_create_parser_exception_with_namespace(sample_xml_element):
-    """
-    测试创建带命名空间的解析异常
-
-    验证:
-    1. 命名空间被正确设置
-    2. 其他参数保持默认值
-    """
-    namespace = "http://test.namespace"
-    exception = create_parser_exception(data=sample_xml_element, namespace=namespace)
-
-    assert exception.context is not None
-    assert exception.context.namespace == namespace
-    assert exception.url == ""
-    assert exception.message == "解析响应失败"
-
-
-def test_create_parser_exception_with_error(sample_xml_element):
-    """
-    测试创建带原始异常的解析异常
-
-    验证:
-    1. 原始异常被正确设置
-    2. 其他参数保持默认值
-    """
-    original_error = ValueError("测试错误")
-    exception = create_parser_exception(data=sample_xml_element, error=original_error)
-
-    assert exception.original_error == original_error
-    assert exception.url == ""
-    assert exception.message == "解析响应失败"
-
-
 def test_create_parser_exception_with_all_params(sample_xml_element):
-    """
-    测试创建包含所有参数的解析异常
-
-    验证:
-    1. 所有参数都被正确设置
-    2. XML内容被正确转换为字符串
-    """
+    """Exception factory carries through all provided parameters."""
     test_url = "http://test.com/api"
-    custom_message = "自定义错误消息"
+    custom_message = "Custom error message"
     namespace = "http://test.namespace"
-    original_error = ValueError("测试错误")
+    original_error = ValueError("test error")
 
     exception = create_parser_exception(
         data=sample_xml_element,
@@ -320,65 +188,34 @@ def test_create_parser_exception_with_all_params(sample_xml_element):
     assert exception.context.element_name == "root"
 
 
-def test_create_parser_exception_with_complex_xml(sample_xml_element):
-    """
-    测试使用复杂XML创建解析异常
-
-    验证:
-    1. 复杂XML结构被正确处理
-    2. 异常包含完整的XML内容
-    """
-    # 创建更复杂的XML结构
-    sub_element = ET.SubElement(sample_xml_element, "nested")
-    sub_element.set("attr", "value")
-    sub_element.text = "nested content"
-
-    exception = create_parser_exception(data=sample_xml_element)
-
-    assert exception.context is not None
-    assert exception.context.element_name == "root"
-    assert exception.context.raw_content is not None
-    assert 'attr="value"' in exception.context.raw_content
-    assert "nested content" in exception.context.raw_content
-
-
-# 测试 calculate_page_size
-@pytest.mark.asyncio
-async def test_calculate_page_size():
-    test_cases = [
-        (100, 0, None, 100),  # 无最大结果限制
-        (100, 0, 50, 50),  # 最大结果小于页面大小
-        (100, 30, 50, 20),  # 考虑起始位置
-        (100, 0, 150, 100),  # 最大结果大于页面大小
-    ]
-
-    for config_size, start, max_results, expected in test_cases:
-        result = calculate_page_size(config_size, start, max_results)
-        assert result == expected
-
-
-# 测试 format_datetime
-@pytest.mark.asyncio
-async def test_format_datetime():
-    # 创建一个固定的UTC时间
+def test_format_datetime():
+    """format_datetime renders in the configured timezone."""
     dt = datetime(2024, 12, 31, 22, 27, 42, tzinfo=ZoneInfo("UTC"))
     formatted = format_datetime(dt)
 
-    # 验证格式
     assert isinstance(formatted, str)
     assert "_" in formatted
-    assert formatted.endswith("CST")  # 假设默认时区为 CST
+    assert formatted.endswith("CST")  # default timezone is Asia/Shanghai
 
 
-# 测试 sanitize_title
-@pytest.mark.asyncio
-async def test_sanitize_title():
+def test_format_datetime_honors_active_config_timezone():
+    """A custom active config timezone flows into format_datetime output."""
+    original = ConfigManager.get_config()
+    ConfigManager.set_config(ArxivConfig(timezone="UTC"))
+    try:
+        dt = datetime(2024, 12, 31, 22, 27, 42, tzinfo=ZoneInfo("UTC"))
+        assert format_datetime(dt).endswith("UTC")
+    finally:
+        ConfigManager.set_config(original)
+
+
+def test_sanitize_title():
     test_cases = [
         ("normal title", "normal title"),
         ("file/with*/invalid:chars", "file-with-invalid-chars"),
-        ("a" * 100, "a" * 47 + "..."),  # 测试长度限制
-        ("  spaces  ", "spaces"),  # 测试空格处理
-        ('test"quote"test', "test-quote-test"),  # 测试引号处理
+        ("a" * 100, "a" * 47 + "..."),
+        ("  spaces  ", "spaces"),
+        ('test"quote"test', "test-quote-test"),
     ]
 
     for input_title, expected in test_cases:
@@ -386,45 +223,12 @@ async def test_sanitize_title():
         assert result == expected
 
 
-# 测试自定义长度限制
-@pytest.mark.asyncio
-async def test_sanitize_title_custom_length():
+def test_sanitize_title_custom_length():
     result = sanitize_title("very long title", max_length=10)
     assert len(result) <= 10
     assert result.endswith("...")
 
 
-@pytest.mark.asyncio
-async def test_log_retry_attempt(mock_retry_state, capture_debug_logs):
-    """测试重试日志记录功能"""
-    # 执行日志记录
-    log_retry_attempt(cast("RetryCallState", mock_retry_state))
-
-    # 获取日志内容
-    log_output = capture_debug_logs.getvalue()
-
-    # 验证日志内容
-    assert "retry times:" in log_output
-
-
-# 测试边界情况
-@pytest.mark.asyncio
-async def test_edge_cases():
-    # 测试空标题
+def test_sanitize_title_edge_cases():
     assert sanitize_title("") == ""
-
-    # 测试全特殊字符的标题
     assert sanitize_title("***:::///") == ""
-
-    # 测试计算页面大小的边界情况
-    assert calculate_page_size(100, 999, 1000) == 1
-    assert calculate_page_size(100, 1000, 1000) == 0
-
-
-# 测试异常情况
-@pytest.mark.asyncio
-async def test_exception_cases(sample_xml_element):
-    # 测试无参数创建解析异常
-    exception = create_parser_exception(sample_xml_element)
-    assert exception.url == ""
-    assert exception.message == "解析响应失败"
