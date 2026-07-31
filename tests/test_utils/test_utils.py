@@ -26,6 +26,10 @@ from aioarxiv.utils.log import ConfigManager
 TOLERANCE = 0.25
 
 
+def test_config_manager_is_singleton():
+    assert ConfigManager() is ConfigManager()
+
+
 @pytest.fixture
 def sample_xml_element():
     """Create a sample XML element for testing."""

@@ -10,7 +10,7 @@ from yarl import URL
 
 from aioarxiv.config import default_config
 from aioarxiv.exception import ParserException, QueryBuildError
-from aioarxiv.models import Category, Paper
+from aioarxiv.models import Category, Paper, SearchParams
 from aioarxiv.utils.arxiv_parser import ArxivParser, PaperParser
 
 if TYPE_CHECKING:
@@ -203,6 +203,34 @@ def test_parse_total_result_invalid_value(mock_response):
         parser.parse_total_result()
 
 
+def test_parse_total_result_missing_element(mock_response):
+    root = ET.fromstring(EMPTY_FEED_XML)  # noqa: S314
+    total_element = root.find("opensearch:totalResults", ArxivParser.NS)
+    assert total_element is not None
+    root.remove(total_element)
+    parser = ArxivParser(ET.tostring(root, encoding="unicode"), mock_response)
+
+    with pytest.raises(ParserException, match="Missing total results element"):
+        parser.parse_total_result()
+
+
+def test_build_search_result_uses_feed_metadata(mock_response):
+    parser = ArxivParser(EMPTY_FEED_XML, mock_response)
+    params = SearchParams(query="all:nothing", max_results=10)
+
+    result = parser.build_search_result(params)
+
+    assert result.papers == []
+    assert result.total_result == 0
+    assert result.page == 1
+    assert result.has_next is False
+    assert result.query_params == params
+    assert result.metadata.missing_results == 0
+    assert result.metadata.pagesize == 0
+    assert result.metadata.source == "http://test.com"
+    assert result.metadata.end_time is None
+
+
 def test_parser_rejects_malformed_xml(mock_response):
     with pytest.raises(ParserException):
         ArxivParser("<feed>not closed", mock_response)
@@ -217,6 +245,27 @@ def test_error_handling_missing_author(paper_entry):
         parser.parse_authors()
 
 
+def test_error_handling_missing_primary_category(paper_entry):
+    primary_category = paper_entry.find("arxiv:primary_category", ArxivParser.NS)
+    assert primary_category is not None
+    paper_entry.remove(primary_category)
+
+    parser = PaperParser(paper_entry)
+    with pytest.raises(ParserException, match="Missing primary category"):
+        parser.parse_categories()
+
+
+@pytest.mark.parametrize("tag", ["id", "title", "summary", "published", "updated"])
+def test_error_handling_missing_basic_element(paper_entry, tag):
+    element = paper_entry.find(f"atom:{tag}", ArxivParser.NS)
+    assert element is not None
+    paper_entry.remove(element)
+
+    parser = PaperParser(paper_entry)
+    with pytest.raises(ParserException, match=f"Missing {tag} element"):
+        parser.parse_basics_info()
+
+
 def test_error_handling_invalid_date():
     parser = PaperParser(ET.Element("entry"))
     with pytest.raises(ValueError, match="Invalid datetime format"):
@@ -229,3 +278,22 @@ def test_error_handling_missing_pdf_url(paper_entry):
 
     parser = PaperParser(paper_entry)
     assert parser.parse_pdf_url() is None
+
+
+def test_parse_pdf_url_returns_none_without_pdf_link(paper_entry):
+    for link in paper_entry.findall(f"{ATOM_NS}link"):
+        if link.get("title") == "pdf":
+            paper_entry.remove(link)
+
+    parser = PaperParser(paper_entry)
+    assert paper_entry.findall(f"{ATOM_NS}link")
+    assert parser.parse_pdf_url() is None
+
+
+def test_parse_datetime_assumes_utc_for_naive_value():
+    parser = PaperParser(ET.Element("entry"))
+
+    parsed = parser.parse_datetime("2024-03-18T00:00:00")
+
+    assert parsed.tzinfo == ZoneInfo(default_config.timezone)
+    assert parsed == datetime(2024, 3, 18, tzinfo=timezone.utc)
