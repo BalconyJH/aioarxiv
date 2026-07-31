@@ -1,0 +1,39 @@
+name: Prek
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # Keep every trusted main SHA alive: Auto Tag joins the exact push runs.
+  # Pull request updates still replace stale checks for the same PR ref.
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  prek:
+    name: Prek
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Install prek
+        uses: j178/prek-action@e98a699c41eb69ab013a45817a0406469a748f8d # v2.0.5
+        with:
+          install-only: true
+          prek-version: "0.3.9"
+
+      - name: Run repository hooks
+        run: prek run --all-files --show-diff-on-failure --color=always
+
+      - name: Validate GitHub Actions workflows
+        run: prek run actionlint --all-files --hook-stage=manual --show-diff-on-failure --color=always
