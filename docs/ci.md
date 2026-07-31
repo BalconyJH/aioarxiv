@@ -44,6 +44,10 @@ Ruleset 无需绑定会随 Python 版本或内部任务扩展而变化的矩阵�
 | `Wheel Smoke` | Python 3.10、3.11、3.13、3.14 隔离安装与导入 |
 | `Required Checks` | 汇总以上所有结果 |
 
+`Basedpyright` 只在 `Ruff` 成功后启动：格式或 lint 已失败时不会继续占用
+Basedpyright runner。`Ty` 和分发包构建仍与 Ruff 并行，以保留彼此独立的反馈并缩短
+成功路径的总耗时。
+
 Python 3.12 的完整 wheel 与 sdist 隔离安装由构建验证覆盖；其余受支持版本通过 wheel
 smoke 验证运行时依赖和导入边界。对应的本地聚合命令是：
 
