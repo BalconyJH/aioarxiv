@@ -1,6 +1,6 @@
 [project]
 name = "aioarxiv"
-version = "0.2.0"
+version = "0.2.2"
 description = "Asynchronous arXiv API client with rate limiting and paper downloads"
 authors = [
     { name = "BalconyJH", email = "balconyjh@gmail.com" },
