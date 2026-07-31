@@ -80,7 +80,7 @@ jobs:
             --cov=aioarxiv \
             --cov-report=term-missing \
             --cov-report="xml:${COVERAGE_XML}" \
-            --cov-fail-under=75 \
+            --cov-fail-under=95 \
             -ra 2>&1 | tee "${PYTEST_LOG}"
 
       - name: Show Failure Diagnostics
